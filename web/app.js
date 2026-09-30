@@ -100,7 +100,7 @@ function renderInstants(ins) {
   const row = el("div", "irow");
   const add = (list, label) => {
     if (!list.length) return;
-    row.append(el("span", "ilabel", label));
+    if (label) row.append(el("span", "ilabel", label));
     for (const c of list) {
       const item = el("div", "icard" + (c.castable ? "" : " locked"));
       const img = el("img");
@@ -114,7 +114,7 @@ function renderInstants(ins) {
     }
   };
   add(ins.shown, "Seen from opponent");
-  add(ins.possible, "Could have (set pool)");
+  add(ins.possible, "");
   if (!row.children.length) row.append(el("span", "ilabel", "Nothing castable with current untapped mana."));
   box.append(row);
 }
