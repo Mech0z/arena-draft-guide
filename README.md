@@ -15,7 +15,7 @@ In Arena: Options > Account > enable **Detailed Logs (Plugin Support)**, then re
 
 ## How it works
 
-- Read-only: tails `Player.log` for `DraftPack` (Premier/Traditional) and `Draft.Notify` `PackCards` (Quick draft) lines; maps Arena card ids to names from the game's local card database (opened read-only). No input is sent to Arena, no memory or network access to the game.
+- Read-only: tails `Player.log` for `DraftPack` payloads (Quick and Premier draft share this same code path; Traditional and Pick-Two use it too) and, as a fallback, `Draft.Notify` `PackCards` lines; maps Arena card ids to names from the game's local card database (opened read-only). No input is sent to Arena, no memory or network access to the game.
 - Ratings are downloaded once from chunk.science into `data/fra.json` (git-ignored; the site is "all rights reserved", so the data is not redistributed here). Refresh with `--refresh-ratings`. Card images load from Scryfall in your browser.
 - The page polls `/api/state` every second and redraws when a new pack arrives.
 
@@ -28,5 +28,6 @@ In Arena: Options > Account > enable **Detailed Logs (Plugin Support)**, then re
 ## Tests
 
     py -3.12 -m unittest discover -s tests -t .
+
 
 
