@@ -60,3 +60,6 @@ main.library { padding-bottom:34vh; }
 .icard .iname { font-weight:600; }
 .icard .pip { min-width:20px; height:20px; font-size:12px; }
 main.library { padding-bottom:46vh; }
+
+.ltype { display:inline; margin-left:10px; }
+main.library { overflow-y:auto; }
