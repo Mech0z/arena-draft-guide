@@ -1,4 +1,4 @@
-﻿# Arena draft guide (Reality Fracture)
+# Arena draft guide (Reality Fracture)
 
 A local, auto-refreshing web page for a second monitor. While you draft in MTG Arena it shows the cards in your current pack with card art, aggregate rating, per-reviewer grades, and written comments/notes from [chunk.science's Reality Fracture tier list](https://chunk.science/mtga-reality-fracture.html). The best-rated card is outlined green and the pack is sorted best-first.
 
@@ -61,3 +61,21 @@ Greyed cards are shown but not currently affordable. Hover for a larger image.
 Limits: the opponent's hand and deck are hidden, so "could have" is a pool
 guess, not knowledge. Mana from creatures, treasures or other non-land sources
 and X costs/cost reductions are not modelled; phyrexian mana is treated as free.
+
+## Screenshots
+
+Draft pick 1 of a simulated Quick Draft (`tools/simulate_draft.py`), then the next pick after a card is taken; the page refreshes by itself:
+
+![Draft pick 1](docs/draft-pick-1.png)
+![Draft pick 2](docs/draft-pick-2.png)
+
+In-game mode on a real match: library with draw chances, mana costs and types, plus the opponent instant-speed bar:
+
+![Game mode](docs/game-mode.png)
+
+### Try it without Arena
+
+```
+py -3.12 tools/simulate_draft.py --log sim.log --interval 4
+py -3.12 -m draftguide --log sim.log --port 8780
+```
