@@ -63,3 +63,12 @@ main.library { padding-bottom:46vh; }
 
 .ltype { display:inline; margin-left:10px; }
 main.library { overflow-y:auto; }
+
+#instants { max-height:52vh; }
+.icard { width:auto; font-size:15px; }
+.icard img { height:36vh; width:auto; aspect-ratio:5/7; }
+main.library { padding-bottom:52vh; }
+
+#instants { max-height:42vh; }
+.icard img { height:27vh; }
+main.library { padding-bottom:42vh; }
