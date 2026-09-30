@@ -1,4 +1,4 @@
-﻿"""Map Arena card ids (GrpId) to names using the game's local card database (read-only)."""
+"""Map Arena card ids (GrpId) to names using the game's local card database (read-only)."""
 from __future__ import annotations
 
 import glob
@@ -38,6 +38,26 @@ def load_cards(db_path: Path) -> dict[int, tuple[str, bool]]:
     finally:
         con.close()
     return {int(grp): (name, "5" in str(types or "").split(",")) for grp, name, types in rows}
+
+
+def load_details(db_path: Path) -> dict[int, tuple[str, str]]:
+    """GrpId -> (Arena mana text such as 'o2oB', type line such as 'Creature - Zombie Cleric')."""
+    con = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
+    try:
+        rows = con.execute(
+            "SELECT c.GrpId, c.OldSchoolManaText, t.Loc, s.Loc FROM Cards c "
+            "LEFT JOIN Localizations_enUS t ON t.LocId = c.TypeTextId "
+            "LEFT JOIN Localizations_enUS s ON s.LocId = c.SubtypeTextId"
+        ).fetchall()
+    finally:
+        con.close()
+    out = {}
+    for grp, mana, types, subtypes in rows:
+        line = types or ""
+        if subtypes:
+            line += " \u2014 " + subtypes
+        out[int(grp)] = (mana or "", line)
+    return out
 
 
 def load_names(db_path: Path) -> dict[int, str]:

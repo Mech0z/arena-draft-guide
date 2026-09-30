@@ -35,3 +35,9 @@ main.library { display: flex; gap: 16px; padding: 8px 16px; grid-template-rows: 
 .librow .bar { position: absolute; left: 0; bottom: 0; height: 3px; background: #4ade80; opacity: .7; }
 .preview { display: none; position: fixed; z-index: 10; pointer-events: none; width: 300px; filter: drop-shadow(0 6px 18px #000); }
 .preview img { width: 100%; border-radius: 12px; display: block; }
+
+:root { --mW:#f3edc8; --mU:#8fc1e8; --mB:#a89a93; --mR:#e88b6d; --mG:#7cc08a; }
+.mana { display:inline-flex; gap:2px; margin-left:8px; vertical-align:middle; }
+.pip { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 2px; border-radius:9px; font-size:11px; font-weight:700; color:#111; background:#cbc2bf; box-sizing:border-box; }
+.pip.cW{background:var(--mW)} .pip.cU{background:var(--mU)} .pip.cB{background:var(--mB)} .pip.cR{background:var(--mR)} .pip.cG{background:var(--mG)}
+.ltype { display:block; font-size:11px; opacity:.6; font-weight:400; }

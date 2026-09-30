@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 const POLL_MS = 1000;
 let lastVersion = null;
 
@@ -76,6 +76,18 @@ const preview = (() => {
   };
 })();
 
+function manaEl(text) {
+  const box = el("span", "mana");
+  for (const sym of (text || "").split("o").filter(Boolean)) {
+    const s = sym.replace(/[()]/g, "");
+    const colors = s.split("/").filter((x) => /^[WUBRG]$/.test(x));
+    const pip = el("span", "pip " + (colors.length > 1 ? "multi" : colors.length ? "c" + colors[0] : "cgen"), colors.length ? colors.join("") : s);
+    if (colors.length > 1) pip.style.background = `linear-gradient(135deg, var(--m${colors[0]}) 50%, var(--m${colors[1]}) 50%)`;
+    box.append(pip);
+  }
+  return box;
+}
+
 function renderLibrary(state) {
   const g = state.game;
   const cards = document.getElementById("cards");
@@ -91,7 +103,10 @@ function renderLibrary(state) {
     col.append(el("h2", "", `${title} · ${total} left · ${pct(g.libraryCount ? total / g.libraryCount : 0)}`));
     for (const c of list) {
       const row = el("div", "librow");
-      row.append(el("span", "cnt", c.count + "×"), el("span", "lname", c.name), el("span", "chance", pct(c.chance)));
+      const nameBox = el("span", "lname");
+      nameBox.append(el("span", "lnm", c.name), manaEl(c.mana));
+      if (c.typeLine) nameBox.append(el("span", "ltype", c.typeLine));
+      row.append(el("span", "cnt", c.count + "×"), nameBox, el("span", "chance", pct(c.chance)));
       const bar = el("span", "bar");
       bar.style.width = Math.min(100, c.chance * 100 * 4) + "%";
       row.append(bar);

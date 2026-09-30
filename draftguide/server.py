@@ -1,4 +1,4 @@
-﻿"""Local HTTP server: serves the page and the live pack state derived from Player.log."""
+"""Local HTTP server: serves the page and the live pack state derived from Player.log."""
 from __future__ import annotations
 
 import argparse
@@ -23,7 +23,8 @@ def _norm(name: str) -> str:
 
 
 class Guide:
-    def __init__(self, data: dict, names: dict[int, str], log_path: Path, demo: bool = False, lands: set[int] | None = None):
+    def __init__(self, data: dict, names: dict[int, str], log_path: Path, demo: bool = False, lands: set[int] | None = None, details: dict | None = None):
+        self.details = details or {}
         self.data = data
         self.names = names
         self.lands = lands or set()
@@ -71,6 +72,8 @@ class Guide:
                 "count": count,
                 "chance": count / total if total else 0.0,
                 "isLand": rep[name] in self.lands,
+                "mana": self.details.get(rep[name], ('', ''))[0],
+                "typeLine": self.details.get(rep[name], ('', ''))[1],
                 "image": self._image(rep[name]),
             }
             for name, count in remaining.items()
@@ -168,7 +171,8 @@ def main(argv=None) -> int:
     lands = {grp for grp, (_name, land) in cards.items() if land}
     if not names and not args.demo:
         print("Warning: Arena card database not found; pass --card-db or set MTGA_CARD_DB.")
-    guide = Guide(data, names, args.log, demo=args.demo, lands=lands)
+    details = arena_db.load_details(db) if db else {}
+    guide = Guide(data, names, args.log, demo=args.demo, lands=lands, details=details)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(guide))
     print(f"Draft guide on http://127.0.0.1:{args.port}  (log: {args.log})")
     try:

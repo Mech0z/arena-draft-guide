@@ -1,4 +1,4 @@
-﻿import json
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -148,6 +148,12 @@ class GameViewTests(unittest.TestCase):
         self.assertAlmostEqual(sum(c["chance"] for c in view["cards"]), 1.0)
         self.assertTrue(by["Bolt"]["image"].startswith("https://api.scryfall.com/cards/named"))
         self.assertEqual([c["name"] for c in view["cards"]][-1], "Forest")  # lands last
+
+    def test_mana_and_type_line_included(self):
+        guide = Guide(ratings.slim(RAW), NAMES, self.log, lands=LANDS, details={2: ('o1oG', 'Creature \u2014 Bear')})
+        self.write(gre(connect(DECK)))
+        card = {c['name']: c for c in guide.snapshot()['game']['cards']}['Bear']
+        self.assertEqual((card['mana'], card['typeLine']), ('o1oG', 'Creature \u2014 Bear'))
 
     def test_no_game_means_no_library_and_version_changes(self):
         snap = self.guide.snapshot()
