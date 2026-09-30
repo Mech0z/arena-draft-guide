@@ -22,10 +22,11 @@ In Arena: Options > Account > enable **Detailed Logs (Plugin Support)**, then re
 ## Limits
 
 - Only the Reality Fracture set is rated; cards not in it show "No rating found".
-- Log parsing was replayed line-by-line against real public Arena logs (Quick, Premier, Traditional and Pick-Two drafts, from andreagrandi/draftomen test fixtures): every pick produced a refreshed pack (14, 13, 12... cards) and Quick Draft's completion cleared the pack. It has not yet been run against your own live Reality Fracture draft; if the page shows Waiting for a draft pack..., check Detailed Logs is enabled.
+- Log parsing was replayed line-by-line against real public Arena logs (Quick and Premier drafts, the formats this tool targets, from andreagrandi/draftomen test fixtures): every pick produced a refreshed pack (14, 13, 12... cards) and Quick Draft's completion cleared the pack. It has not yet been run against your own live Reality Fracture draft; if the page shows Waiting for a draft pack..., check Detailed Logs is enabled.
 - Ratings are aggregated opinions, not a pick for you; the page doesn't account for your colors so far (possible next step: use `PickedCards`).
 
 ## Tests
 
     py -3.12 -m unittest discover -s tests -t .
+
 
