@@ -72,7 +72,7 @@ class GameTracker:
         changed = False
         for message in event.get("greToClientMessages", []):
             seats = message.get("systemSeatIds") or []
-            if seats:
+            if len(seats) == 1:
                 self.seat = seats[0]
             kind = message.get("type")
             if kind == "GREMessageType_ConnectResp":
@@ -129,3 +129,4 @@ class GameTracker:
         left = Counter(key(g) for g in self.deck)
         left.subtract(Counter(key(g) for g in self.seen_grp_ids()))
         return Counter({k: v for k, v in left.items() if v > 0})
+

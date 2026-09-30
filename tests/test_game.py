@@ -107,6 +107,12 @@ class TrackerTests(unittest.TestCase):
         feed(t, gre(state([zone(2, "ZoneType_Hand", [200], 1)], [obj(200, 1)], full=True)))
         self.assertFalse(t.active)
 
+    def test_multi_seat_messages_do_not_change_seat(self):
+        t = GameTracker()
+        feed(t, gre(connect(DECK, seat=2)))
+        feed(t, gre({"type": "GREMessageType_TimerStateMessage", "systemSeatIds": [1, 2]}))
+        self.assertEqual(t.seat, 2)
+
     def test_version_bumps_only_on_change(self):
         t = GameTracker()
         feed(t, "noise\n" * 5)
@@ -164,3 +170,4 @@ class GameViewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
