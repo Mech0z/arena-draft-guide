@@ -16,48 +16,40 @@ function scoreColor(score) {
 
 function renderCard(card, isBest) {
   const root = el("article", "card" + (isBest ? " best" : "") + (card.unrated ? " unrated" : ""));
-  const top = el("div", "top");
   if (card.image) {
     const img = el("img");
     img.src = card.image;
     img.alt = card.name;
-    img.loading = "lazy";
-    top.append(img);
+    root.append(img);
   }
-  const meta = el("div", "meta");
-  meta.append(el("div", "name", card.name));
-  meta.append(el("div", "sub", [card.manaCost, card.typeLine, card.rarity].filter(Boolean).join(" · ")));
-  if (card.unrated) {
-    meta.append(el("div", "rank", "No rating found"));
-  } else {
+  const body = el("div", "body");
+  const head = el("div", "head");
+  if (!card.unrated) {
     const score = el("div", "score", card.score === null ? "–" : Math.round(card.score));
     if (card.score !== null) score.style.background = scoreColor(card.score);
-    meta.append(score);
-    meta.append(el("div", "rank", `#${card.rank} of ${card.rankOf} overall · #${card.colorRank} of ${card.colorRankOf} in color`));
-    if (card.signal && card.signal !== "consensus") meta.append(el("div", "rank", `Reviewers: ${card.signal}`));
+    head.append(score);
   }
-  top.append(meta);
-  root.append(top);
-  for (const r of card.ratings || []) {
-    const row = el("div", "rating-row");
-    row.append(el("span", "src", r.source), el("span", "g", String(r.grade)), el("span", "", String(Math.round(r.score))));
-    root.append(row);
-  }
+  const title = el("div", "title");
+  title.append(el("div", "name", card.name));
+  title.append(el("div", "sub", card.unrated ? "No rating found" :
+    `#${card.rank} of ${card.rankOf} · ${[card.manaCost, card.rarity].filter(Boolean).join(" · ")}`));
+  head.append(title);
+  body.append(head);
+
+  const texts = el("div", "texts");
   for (const r of card.ratings || []) {
     if (!r.comment) continue;
-    const c = el("div", "comment");
-    c.append(el("b", "", r.source + ": "), document.createTextNode(r.comment));
-    root.append(c);
+    const p = el("p", "");
+    p.append(el("b", "", r.source + ": "), document.createTextNode(r.comment));
+    texts.append(p);
   }
-  if (card.notes && card.notes.length) {
-    const notes = el("div", "notes");
-    for (const n of card.notes) {
-      const p = el("div", "");
-      p.append(el("b", "", n.source + ": "), document.createTextNode(n.text));
-      notes.append(p);
-    }
-    root.append(notes);
+  for (const n of card.notes || []) {
+    const p = el("p", "");
+    p.append(el("b", "", n.source + ": "), document.createTextNode(n.text));
+    texts.append(p);
   }
+  body.append(texts);
+  root.append(body);
   return root;
 }
 
