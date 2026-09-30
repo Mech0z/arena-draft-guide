@@ -48,3 +48,16 @@ battlefield, graveyard, exile and stack. Printings are grouped by name. A
 Limits: needs Detailed Logs enabled; tested on synthetic and old public GRE
 fixtures only, not yet on a live modern match. A match joined mid-game has no
 deck list, so no library view.
+
+### Opponent instant-speed guide (bottom bar)
+
+In game mode a bar at the bottom shows what the opponent could cast at instant
+speed right now: it counts the opponent's untapped lands (basic type, or the
+colour identity of non-basics), then lists (1) instants/flash cards they have
+already shown (battlefield, graveyard, exile, stack) and (2) Reality Fracture
+instant/flash cards in their colours that their untapped mana can pay for.
+Greyed cards are shown but not currently affordable. Hover for a larger image.
+
+Limits: the opponent's hand and deck are hidden, so "could have" is a pool
+guess, not knowledge. Mana from creatures, treasures or other non-land sources
+and X costs/cost reductions are not modelled; phyrexian mana is treated as free.

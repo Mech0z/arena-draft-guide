@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from . import arena_db, logparse, ratings
+from . import arena_db, instants, logparse, ratings
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -23,8 +23,11 @@ def _norm(name: str) -> str:
 
 
 class Guide:
-    def __init__(self, data: dict, names: dict[int, str], log_path: Path, demo: bool = False, lands: set[int] | None = None, details: dict | None = None):
+    def __init__(self, data: dict, names: dict[int, str], log_path: Path, demo: bool = False, lands: set[int] | None = None, details: dict | None = None,
+                 instant_info: dict | None = None, land_colors: dict | None = None):
         self.details = details or {}
+        self.instant_info = instant_info or {}
+        self.land_colors = land_colors or {}
         self.data = data
         self.names = names
         self.lands = lands or set()
@@ -86,7 +89,17 @@ class Guide:
             "libraryZoneSize": zone_size,
             "consistent": zone_size is None or zone_size == total,
             "cards": cards,
+            "instants": self.instant_view(game),
         }
+
+    def instant_view(self, game) -> dict:
+        view = instants.guide(game.opponent_lands(), game.opponent_seen_grp_ids(), self.instant_info, self.land_colors)
+        for key in ("shown", "possible"):
+            view[key] = [
+                {"name": c["name"], "mana": c["mana"], "kind": c["kind"], "castable": c["castable"], "image": self._image(c["grp"])}
+                for c in view[key]
+            ]
+        return view
 
     def refresh(self) -> None:
         if self.demo:
@@ -172,7 +185,10 @@ def main(argv=None) -> int:
     if not names and not args.demo:
         print("Warning: Arena card database not found; pass --card-db or set MTGA_CARD_DB.")
     details = arena_db.load_details(db) if db else {}
-    guide = Guide(data, names, args.log, demo=args.demo, lands=lands, details=details)
+    instant_info = arena_db.load_instant_speed(db) if db else {}
+    land_colors = arena_db.load_land_colors(db) if db else {}
+    guide = Guide(data, names, args.log, demo=args.demo, lands=lands, details=details,
+                  instant_info=instant_info, land_colors=land_colors)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(guide))
     print(f"Draft guide on http://127.0.0.1:{args.port}  (log: {args.log})")
     try:

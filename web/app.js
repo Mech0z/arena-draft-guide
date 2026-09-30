@@ -88,7 +88,39 @@ function manaEl(text) {
   return box;
 }
 
+function renderInstants(ins) {
+  const box = document.getElementById("instants");
+  box.replaceChildren();
+  if (!ins) { box.hidden = true; return; }
+  box.hidden = false;
+  const head = el("div", "ihead");
+  head.append(el("b", "", "Opponent instant-speed"),
+    document.createTextNode(` · ${ins.untapped} of ${ins.lands} lands untapped · colours ${ins.colours || "unknown"}`));
+  box.append(head);
+  const row = el("div", "irow");
+  const add = (list, label) => {
+    if (!list.length) return;
+    row.append(el("span", "ilabel", label));
+    for (const c of list) {
+      const item = el("div", "icard" + (c.castable ? "" : " locked"));
+      const img = el("img");
+      img.src = c.image;
+      img.alt = c.name;
+      item.append(img, el("span", "iname", c.name), manaEl(c.mana));
+      item.addEventListener("mouseenter", (e) => preview.show(c.image, e));
+      item.addEventListener("mousemove", (e) => preview.move(e));
+      item.addEventListener("mouseleave", () => preview.hide());
+      row.append(item);
+    }
+  };
+  add(ins.shown, "Seen from opponent");
+  add(ins.possible, "Could have (set pool)");
+  if (!row.children.length) row.append(el("span", "ilabel", "Nothing castable with current untapped mana."));
+  box.append(row);
+}
+
 function renderLibrary(state) {
+  renderInstants(state.game.instants);
   const g = state.game;
   const cards = document.getElementById("cards");
   cards.className = "library";
@@ -121,6 +153,7 @@ function renderLibrary(state) {
 
 function render(state) {
   preview.hide();
+  if (!state.game) renderInstants(null);
   if (state.game) return renderLibrary(state);
   document.getElementById("cards").className = "";
   const cards = document.getElementById("cards");

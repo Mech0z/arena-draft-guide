@@ -1,4 +1,4 @@
-﻿"""Track the local player's library during a match from GRE messages in Player.log.
+"""Track the local player's library during a match from GRE messages in Player.log.
 
 The library is hidden information, so it is reconstructed as: submitted deck list minus
 every card this seat owns that is currently in a visible zone (hand, battlefield,
@@ -28,6 +28,7 @@ class GameTracker:
         self.seat: int | None = None
         self._objects: dict[int, tuple[int, int | None]] = {}  # instanceId -> (grpId, ownerSeat)
         self._zones: dict[int, tuple[str, int | None, list[int]]] = {}
+        self._info: dict[int, dict] = {}  # instanceId -> controller / tapped / types
         self._armed = False
         self._buf: list[str] | None = None
 
@@ -88,6 +89,7 @@ class GameTracker:
         self.deck = [int(c) for c in deck]
         self._objects.clear()
         self._zones.clear()
+        self._info.clear()
         self.active = bool(self.deck)
         return True
 
@@ -95,13 +97,21 @@ class GameTracker:
         if gsm.get("type") == "GameStateType_Full":
             self._objects.clear()
             self._zones.clear()
+            self._info.clear()
         for zone in gsm.get("zones", []):
             self._zones[zone["zoneId"]] = (zone.get("type", ""), zone.get("ownerSeatId"), list(zone.get("objectInstanceIds", [])))
         for obj in gsm.get("gameObjects", []):
             if obj.get("type") in _CARD_TYPES:
                 self._objects[obj["instanceId"]] = (obj.get("grpId", 0), obj.get("ownerSeatId"))
+                self._info[obj["instanceId"]] = {
+                    "controller": obj.get("controllerSeatId", obj.get("ownerSeatId")),
+                    "tapped": bool(obj.get("isTapped")),
+                    "types": obj.get("cardTypes", []),
+                    "subtypes": obj.get("subtypes", []),
+                }
         for instance_id in gsm.get("diffDeletedInstanceIds", []):
             self._objects.pop(instance_id, None)
+            self._info.pop(instance_id, None)
         if (gsm.get("gameInfo") or {}).get("stage") == "GameStage_GameOver":
             self.active = False
         return True
@@ -130,3 +140,31 @@ class GameTracker:
         left.subtract(Counter(key(g) for g in self.seen_grp_ids()))
         return Counter({k: v for k, v in left.items() if v > 0})
 
+
+    def _opponent(self, owner: int | None) -> bool:
+        return self.seat is not None and owner is not None and owner != self.seat
+
+    def opponent_seen_grp_ids(self) -> list[int]:
+        """Opponent-owned cards publicly visible on the battlefield, in graveyard/exile or on the stack."""
+        seen = []
+        for zone_type, _owner, instances in self._zones.values():
+            if zone_type not in _VISIBLE_ZONES or zone_type == "ZoneType_Hand":
+                continue
+            for instance_id in instances:
+                grp, owner = self._objects.get(instance_id, (0, None))
+                if grp and self._opponent(owner):
+                    seen.append(grp)
+        return seen
+
+    def opponent_lands(self) -> list[tuple[int, list[str], bool]]:
+        """(grpId, subtypes, tapped) for lands the opponent controls on the battlefield."""
+        lands = []
+        for zone_type, _owner, instances in self._zones.values():
+            if zone_type != "ZoneType_Battlefield":
+                continue
+            for instance_id in instances:
+                info = self._info.get(instance_id)
+                grp, _owner_seat = self._objects.get(instance_id, (0, None))
+                if info and grp and self._opponent(info["controller"]) and "CardType_Land" in info["types"]:
+                    lands.append((grp, info["subtypes"], info["tapped"]))
+        return lands

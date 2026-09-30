@@ -41,3 +41,14 @@ main.library { display: flex; gap: 16px; padding: 8px 16px; grid-template-rows: 
 .pip { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 2px; border-radius:9px; font-size:11px; font-weight:700; color:#111; background:#cbc2bf; box-sizing:border-box; }
 .pip.cW{background:var(--mW)} .pip.cU{background:var(--mU)} .pip.cB{background:var(--mB)} .pip.cR{background:var(--mR)} .pip.cG{background:var(--mG)}
 .ltype { display:block; font-size:11px; opacity:.6; font-weight:400; }
+
+#instants { position:fixed; left:0; right:0; bottom:0; max-height:34vh; overflow:auto; background:#0f1116; border-top:2px solid #2d3340; padding:6px 12px; z-index:5; }
+#instants .ihead { font-size:12px; margin-bottom:4px; opacity:.85; }
+#instants .irow { display:flex; flex-wrap:wrap; gap:6px; align-items:flex-start; }
+#instants .ilabel { font-size:11px; opacity:.6; align-self:center; text-transform:uppercase; }
+.icard { width:92px; font-size:10px; text-align:center; }
+.icard img { width:92px; height:128px; object-fit:cover; border-radius:5px; display:block; }
+.icard.locked img { opacity:.35; filter:grayscale(1); }
+.icard .iname { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.icard .mana { margin:0; justify-content:center; }
+main.library { padding-bottom:34vh; }
