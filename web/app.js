@@ -53,7 +53,61 @@ function renderCard(card, isBest) {
   return root;
 }
 
+function pct(x) {
+  return (x * 100).toFixed(x >= 0.1 ? 1 : 2) + "%";
+}
+
+const preview = (() => {
+  const box = el("div", "preview");
+  const img = el("img");
+  box.append(img);
+  document.body.append(box);
+  const place = (e) => {
+    const w = box.offsetWidth || 300, h = box.offsetHeight || 420;
+    const x = e.clientX + 20 + w > innerWidth ? e.clientX - 20 - w : e.clientX + 20;
+    const y = Math.max(4, Math.min(e.clientY - h / 2, innerHeight - h - 4));
+    box.style.left = x + "px";
+    box.style.top = y + "px";
+  };
+  return {
+    show(src, e) { if (img.getAttribute("src") !== src) img.src = src; box.style.display = "block"; place(e); },
+    move: place,
+    hide() { box.style.display = "none"; },
+  };
+})();
+
+function renderLibrary(state) {
+  const g = state.game;
+  const cards = document.getElementById("cards");
+  cards.className = "library";
+  cards.replaceChildren();
+  document.getElementById("pickinfo").textContent =
+    `In game · Library ${g.libraryCount} of ${g.deckSize} cards` + (g.consistent ? "" : " · count may be off");
+  const groups = [["Spells", g.cards.filter((c) => !c.isLand)], ["Lands", g.cards.filter((c) => c.isLand)]];
+  for (const [title, list] of groups) {
+    if (!list.length) continue;
+    const total = list.reduce((s, c) => s + c.count, 0);
+    const col = el("section", "libgroup");
+    col.append(el("h2", "", `${title} · ${total} left · ${pct(g.libraryCount ? total / g.libraryCount : 0)}`));
+    for (const c of list) {
+      const row = el("div", "librow");
+      row.append(el("span", "cnt", c.count + "×"), el("span", "lname", c.name), el("span", "chance", pct(c.chance)));
+      const bar = el("span", "bar");
+      bar.style.width = Math.min(100, c.chance * 100 * 4) + "%";
+      row.append(bar);
+      row.addEventListener("mouseenter", (e) => preview.show(c.image, e));
+      row.addEventListener("mousemove", (e) => preview.move(e));
+      row.addEventListener("mouseleave", () => preview.hide());
+      col.append(row);
+    }
+    cards.append(col);
+  }
+}
+
 function render(state) {
+  preview.hide();
+  if (state.game) return renderLibrary(state);
+  document.getElementById("cards").className = "";
   const cards = document.getElementById("cards");
   cards.replaceChildren();
   const info = document.getElementById("pickinfo");
@@ -101,3 +155,4 @@ async function tick() {
 
 tick();
 setInterval(tick, POLL_MS);
+

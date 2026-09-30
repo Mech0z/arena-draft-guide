@@ -31,3 +31,20 @@ In Arena: Options > Account > enable **Detailed Logs (Plugin Support)**, then re
 
 
 
+
+## Game mode: library and draw chances
+
+When a match starts, the page switches to a library view: every card still in
+your library, its count and the chance to draw it next. Hovering a row shows
+the card image (Scryfall, or the chunk.science image for FRA cards). After the
+game ends it falls back to the draft view.
+
+How it works: the library is hidden in the log, so it is derived as your
+deck list (from the GRE `ConnectResp`) minus your own cards seen in hand,
+battlefield, graveyard, exile and stack. Printings are grouped by name. A
+"?" warning shows if the derived size differs from Arena's library zone size
+(tokens, stolen or copied cards can skew counts).
+
+Limits: needs Detailed Logs enabled; tested on synthetic and old public GRE
+fixtures only, not yet on a live modern match. A match joined mid-game has no
+deck list, so no library view.

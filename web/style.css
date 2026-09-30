@@ -24,3 +24,14 @@ main { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(5, 1
 .texts b { color: #9cc4ff; }
 footer { display: none; }
 
+main.library { display: flex; gap: 16px; padding: 8px 16px; grid-template-rows: none; overflow: hidden; }
+.libgroup { flex: 1; min-width: 0; overflow: hidden; }
+.libgroup h2 { font-size: 14px; margin: 4px 0 6px; color: #9cc4ff; }
+.librow { position: relative; display: flex; gap: 10px; align-items: baseline; padding: 3px 8px; margin-bottom: 2px; background: #1b1e27; border-radius: 6px; overflow: hidden; cursor: default; }
+.librow:hover { background: #262b38; }
+.librow .cnt { width: 28px; color: #8a90a0; }
+.librow .lname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; z-index: 1; }
+.librow .chance { font-weight: 700; position: relative; z-index: 1; }
+.librow .bar { position: absolute; left: 0; bottom: 0; height: 3px; background: #4ade80; opacity: .7; }
+.preview { display: none; position: fixed; z-index: 10; pointer-events: none; width: 300px; filter: drop-shadow(0 6px 18px #000); }
+.preview img { width: 100%; border-radius: 12px; display: block; }

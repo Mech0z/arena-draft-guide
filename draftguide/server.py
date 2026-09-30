@@ -8,7 +8,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from . import arena_db, logparse, ratings
 
@@ -23,9 +23,10 @@ def _norm(name: str) -> str:
 
 
 class Guide:
-    def __init__(self, data: dict, names: dict[int, str], log_path: Path, demo: bool = False):
+    def __init__(self, data: dict, names: dict[int, str], log_path: Path, demo: bool = False, lands: set[int] | None = None):
         self.data = data
         self.names = names
+        self.lands = lands or set()
         self.log_path = log_path
         self.demo = demo
         self.state = logparse.DraftLogState()
@@ -44,6 +45,45 @@ class Guide:
         if card is None:
             return {"arenaId": card_id, "name": name, "unrated": True}
         return {**card, "arenaId": card_id, "unrated": False}
+
+    def _name(self, grp: int) -> str:
+        return self.names.get(grp, f"Unknown card ({grp})")
+
+    def _image(self, grp: int) -> str:
+        name = self._name(grp)
+        rated = self.by_name.get(_norm(name)) or self.by_name.get(_norm(name.split(" // ")[0]))
+        if rated and rated.get("image"):
+            return rated["image"]
+        return "https://api.scryfall.com/cards/named?format=image&version=normal&exact=" + quote(name.split(" // ")[0])
+
+    def game_view(self) -> dict | None:
+        game = self.state.game
+        if not game.active or not game.deck:
+            return None
+        remaining = game.remaining(key=self._name)
+        total = sum(remaining.values())
+        rep = {}
+        for grp in game.deck:
+            rep.setdefault(self._name(grp), grp)
+        cards = [
+            {
+                "name": name,
+                "count": count,
+                "chance": count / total if total else 0.0,
+                "isLand": rep[name] in self.lands,
+                "image": self._image(rep[name]),
+            }
+            for name, count in remaining.items()
+        ]
+        cards.sort(key=lambda c: (c["isLand"], -c["count"], c["name"]))
+        zone_size = game.library_zone_size()
+        return {
+            "libraryCount": total,
+            "deckSize": len(game.deck),
+            "libraryZoneSize": zone_size,
+            "consistent": zone_size is None or zone_size == total,
+            "cards": cards,
+        }
 
     def refresh(self) -> None:
         if self.demo:
@@ -71,7 +111,8 @@ class Guide:
                     cards = [self.lookup(i) for i in obs.card_ids]
             cards.sort(key=lambda c: (c.get("unrated", False), -(c.get("score") or 0)))
             return {
-                "version": version,
+                "version": f"{version}.{self.state.game.version}",
+                "game": self.game_view(),
                 "pack": pack,
                 "cards": cards,
                 "status": {
@@ -122,10 +163,12 @@ def main(argv=None) -> int:
 
     data = ratings.load(ROOT / "data" / "fra.json", refresh=args.refresh_ratings)
     db = args.card_db or arena_db.find_database()
-    names = arena_db.load_names(db) if db else {}
+    cards = arena_db.load_cards(db) if db else {}
+    names = {grp: name for grp, (name, _land) in cards.items()}
+    lands = {grp for grp, (_name, land) in cards.items() if land}
     if not names and not args.demo:
         print("Warning: Arena card database not found; pass --card-db or set MTGA_CARD_DB.")
-    guide = Guide(data, names, args.log, demo=args.demo)
+    guide = Guide(data, names, args.log, demo=args.demo, lands=lands)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(guide))
     print(f"Draft guide on http://127.0.0.1:{args.port}  (log: {args.log})")
     try:
@@ -133,3 +176,7 @@ def main(argv=None) -> int:
     except KeyboardInterrupt:
         pass
     return 0
+
+
+
+

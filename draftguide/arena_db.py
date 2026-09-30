@@ -27,13 +27,18 @@ def find_database() -> Path | None:
     return Path(max(found, key=os.path.getmtime))
 
 
-def load_names(db_path: Path) -> dict[int, str]:
+def load_cards(db_path: Path) -> dict[int, tuple[str, bool]]:
+    """GrpId -> (English name, is_land)."""
     con = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
     try:
         rows = con.execute(
-            "SELECT c.GrpId, l.Loc FROM Cards c "
+            "SELECT c.GrpId, l.Loc, c.Types FROM Cards c "
             "JOIN Localizations_enUS l ON l.LocId = c.TitleId"
         ).fetchall()
     finally:
         con.close()
-    return {int(grp): name for grp, name in rows}
+    return {int(grp): (name, "5" in str(types or "").split(",")) for grp, name, types in rows}
+
+
+def load_names(db_path: Path) -> dict[int, str]:
+    return {grp: name for grp, (name, _land) in load_cards(db_path).items()}

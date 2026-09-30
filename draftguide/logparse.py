@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .game import GameTracker
+
 _BOT_PACK = re.compile(r'"DraftPack"\s*:\s*\[([^\]]*)\]')
 _QUICK_PACK = re.compile(r'"PackCards"\s*:\s*"([0-9,\s]*)"')
 _NUM = {
@@ -32,6 +34,7 @@ class DraftLogState:
     version: int = 0
     offset: int = 0
     _seen: tuple = field(default=(), repr=False)
+    game: GameTracker = field(default_factory=GameTracker)
 
 
 def parse_line(line: str) -> PackObservation | None:
@@ -63,6 +66,8 @@ def parse_line(line: str) -> PackObservation | None:
 def apply_lines(state: DraftLogState, lines) -> bool:
     changed = False
     for line in lines:
+        if state.game.feed_line(line):
+            changed = True
         obs = parse_line(line)
         if obs is None:
             continue
@@ -86,6 +91,7 @@ def poll(state: DraftLogState, log_path: Path) -> bool:
         state.offset = 0
         state.pack = None
         state._seen = ()
+        state.game = GameTracker()
         state.version += 1
     if size == state.offset:
         return False
@@ -97,3 +103,4 @@ def poll(state: DraftLogState, log_path: Path) -> bool:
         return False
     state.offset += end + 1
     return apply_lines(state, chunk[: end + 1].decode("utf-8", errors="replace").splitlines())
+
