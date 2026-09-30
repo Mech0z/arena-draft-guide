@@ -24,11 +24,19 @@ def _norm(name: str) -> str:
 
 class Guide:
     def __init__(self, data: dict, names: dict[int, str], log_path: Path, demo: bool = False, lands: set[int] | None = None, details: dict | None = None,
-                 instant_info: dict | None = None, land_colors: dict | None = None):
+                 instant_info: dict | None = None, land_colors: dict | None = None,
+                 expansions: dict | None = None, provider=None):
+        self.expansions = expansions or {}
+        self.provider = provider
+        self.indexes: dict[tuple[str, str], dict | None] = {}
+        self.fail_until: dict[tuple[str, str], float] = {}
+        self.current_set: str | None = None
+        self.current_fmt = "PremierDraft"
+        self.set_data: dict[str, dict] = {}
         self.details = details or {}
         self.instant_info = instant_info or {}
         self.land_colors = land_colors or {}
-        self.data = data
+        self.data = data or {"cards": []}
         self.names = names
         self.lands = lands or set()
         self.log_path = log_path
@@ -36,10 +44,49 @@ class Guide:
         self.state = logparse.DraftLogState()
         self.updated_at: float | None = None
         self.lock = threading.Lock()
-        self.by_name: dict[str, dict] = {}
+        self.default_set = (((data or {}).get("set") or {}).get("code") or "").upper() or None
+        if data:
+            self.set_data[self.default_set or ""] = data
+            self.indexes[(self.default_set or "", "*")] = self._index(data)
+
+    @staticmethod
+    def _index(data: dict) -> dict[str, dict]:
+        by_name: dict[str, dict] = {}
         for card in data["cards"]:
-            self.by_name.setdefault(_norm(card["name"]), card)
-            self.by_name.setdefault(_norm(card["name"].split(" // ")[0]), card)
+            by_name.setdefault(_norm(card["name"]), card)
+            by_name.setdefault(_norm(card["name"].split(" // ")[0]), card)
+        return by_name
+
+    def _ratings_for(self, code: str | None, fmt: str) -> tuple[dict, dict]:
+        """(data, name index) for a set; empty when unavailable. Failures are retried after 5 minutes."""
+        code = (code or self.default_set or "").upper()
+        if (code, "*") in self.indexes:
+            return self.set_data[code], self.indexes[(code, "*")]
+        key = (code, fmt)
+        if key not in self.indexes and self.provider and code and time.time() >= self.fail_until.get(key, 0):
+            try:
+                data = self.provider(code, fmt)
+                self.set_data[f"{code}/{fmt}"] = data
+                self.indexes[key] = self._index(data)
+            except Exception:
+                self.fail_until[key] = time.time() + 300
+        if key not in self.indexes:
+            return {}, {}
+        return self.set_data[f"{code}/{fmt}"], self.indexes[key]
+
+    @property
+    def by_name(self) -> dict[str, dict]:
+        return self._ratings_for(self.current_set, self.current_fmt)[1]
+
+    def detect_game_set(self) -> str | None:
+        counts: dict[str, int] = {}
+        for grp in self.state.game.deck:
+            if grp in self.lands:
+                continue
+            code = self.expansions.get(grp)
+            if code:
+                counts[code] = counts.get(code, 0) + 1
+        return max(counts, key=counts.get) if counts else None
 
     def lookup(self, card_id: int) -> dict:
         name = self.names.get(card_id)
@@ -64,6 +111,7 @@ class Guide:
         game = self.state.game
         if not game.active or not game.deck:
             return None
+        self.current_set = self.detect_game_set() or self.current_set
         remaining = game.remaining(key=self._name)
         total = sum(remaining.values())
         rep = {}
@@ -93,7 +141,8 @@ class Guide:
         }
 
     def instant_view(self, game) -> dict:
-        view = instants.guide(game.opponent_lands(), game.opponent_seen_grp_ids(), self.instant_info, self.land_colors)
+        view = instants.guide(game.opponent_lands(), game.opponent_seen_grp_ids(), self.instant_info, self.land_colors,
+                              pool_set=self.current_set or self.default_set or "FRA")
         for key in ("shown", "possible"):
             view[key] = [
                 {"name": c["name"], "mana": c["mana"], "kind": c["kind"], "castable": c["castable"], "image": self._image(c["grp"])}
@@ -124,10 +173,19 @@ class Guide:
                         "pick": None if obs.pick_number is None else obs.pick_number + 1,
                         "event": obs.event_name,
                     }
+                    parsed = ratings.parse_event(obs.event_name)
+                    if parsed:
+                        self.current_fmt, self.current_set = parsed
                     cards = [self.lookup(i) for i in obs.card_ids]
+                    for c in cards:
+                        if c.get("arenaId") in self.details:
+                            c["manaArena"] = self.details[c["arenaId"]][0]
             cards.sort(key=lambda c: (c.get("unrated", False), -(c.get("score") or 0)))
+            code = self.current_set or self.default_set
+            ratings_data, _ = self._ratings_for(code, self.current_fmt) if not self.demo else (self.data, {})
             return {
                 "version": f"{version}.{self.state.game.version}",
+                "set": code,
                 "game": self.game_view(),
                 "pack": pack,
                 "cards": cards,
@@ -136,8 +194,10 @@ class Guide:
                     "cardDb": bool(self.names) or self.demo,
                     "demo": self.demo,
                     "updatedAt": self.updated_at,
-                    "ratingsGeneratedAt": self.data.get("generatedAt"),
-                    "attribution": self.data.get("attribution"),
+                    "ratingsGeneratedAt": ratings_data.get("generatedAt"),
+                    "attribution": ratings_data.get("attribution"),
+                    "source": "17Lands" if "17lands" in (ratings_data.get("attribution") or "") else "chunk.science",
+                    "ratingsAvailable": bool(ratings_data),
                 },
             }
 
@@ -169,7 +229,7 @@ def make_handler(guide: Guide):
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Live Reality Fracture draft guide")
+    ap = argparse.ArgumentParser(description="Live Arena draft guide (any set)")
     ap.add_argument("--log", type=Path, default=DEFAULT_LOG, help="Path to Arena Player.log")
     ap.add_argument("--card-db", type=Path, help="Arena Raw_CardDatabase_*.mtga (auto-detected)")
     ap.add_argument("--port", type=int, default=8765)
@@ -177,7 +237,12 @@ def main(argv=None) -> int:
     ap.add_argument("--demo", action="store_true", help="Show a sample pack without Arena")
     args = ap.parse_args(argv)
 
-    data = ratings.load(ROOT / "data" / "fra.json", refresh=args.refresh_ratings)
+    store = ratings.Store(ROOT / "data", refresh=args.refresh_ratings)
+    try:
+        data = store.get("FRA")
+    except Exception as exc:
+        print(f"Warning: default ratings unavailable ({exc}); other sets load on demand.")
+        data = None
     db = args.card_db or arena_db.find_database()
     cards = arena_db.load_cards(db) if db else {}
     names = {grp: name for grp, (name, _land) in cards.items()}
@@ -187,8 +252,9 @@ def main(argv=None) -> int:
     details = arena_db.load_details(db) if db else {}
     instant_info = arena_db.load_instant_speed(db) if db else {}
     land_colors = arena_db.load_land_colors(db) if db else {}
+    expansions = arena_db.load_expansions(db) if db else {}
     guide = Guide(data, names, args.log, demo=args.demo, lands=lands, details=details,
-                  instant_info=instant_info, land_colors=land_colors)
+                  instant_info=instant_info, land_colors=land_colors, expansions=expansions, provider=store.get)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(guide))
     print(f"Draft guide on http://127.0.0.1:{args.port}  (log: {args.log})")
     try:

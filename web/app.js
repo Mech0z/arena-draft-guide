@@ -32,7 +32,8 @@ function renderCard(card, isBest) {
   const title = el("div", "title");
   title.append(el("div", "name", card.name));
   title.append(el("div", "sub", card.unrated ? "No rating found" :
-    `#${card.rank} of ${card.rankOf} · ${[card.manaCost, card.rarity].filter(Boolean).join(" · ")}`));
+    (card.score === null ? "Not enough data" : `#${card.rank} of ${card.rankOf}`) + (card.rarity ? " \u00b7 " + card.rarity : "")));
+  if (card.manaArena) title.querySelector(".sub").append(" ", manaEl(card.manaArena));
   head.append(title);
   body.append(head);
 
@@ -182,6 +183,9 @@ function renderStatus(state, error) {
     if (state.status.updatedAt) parts.push("updated " + new Date(state.status.updatedAt * 1000).toLocaleTimeString());
     const a = document.getElementById("attr");
     if (state.status.attribution) a.href = state.status.attribution;
+    if (state.status.source) a.textContent = state.status.source;
+    document.getElementById("title").textContent = (state.set ? state.set + " " : "") + "draft guide";
+    document.title = (state.set ? state.set + " " : "") + "Draft Guide";
   }
   s.textContent = parts.join(" · ");
   s.className = error || !state.status.cardDb || !state.status.logFound ? "warn" : "";

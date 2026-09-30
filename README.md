@@ -1,4 +1,4 @@
-# Arena draft guide (Reality Fracture)
+﻿# Arena draft guide (any draft set)
 
 A local, auto-refreshing web page for a second monitor. While you draft in MTG Arena it shows the cards in your current pack with card art, aggregate rating, per-reviewer grades, and written comments/notes from [chunk.science's Reality Fracture tier list](https://chunk.science/mtga-reality-fracture.html). The best-rated card is outlined green and the pack is sorted best-first.
 
@@ -21,7 +21,7 @@ In Arena: Options > Account > enable **Detailed Logs (Plugin Support)**, then re
 
 ## Limits
 
-- Only the Reality Fracture set is rated; cards not in it show "No rating found".
+- Works for any set: the set and format are read from the draft's event name (Premier/Quick/Traditional) and, in games, from the expansion codes in your deck. Reality Fracture (FRA) uses chunk.science; every other set uses 17Lands win-rate data (score = percentile of games-in-hand win rate among cards with 200+ games, cached in `data/17l-<SET>-<format>.json` for 12h). Cards without enough data show "Not enough data" with art and mana cost; if 17Lands is unreachable, cards show unrated and retry after 5 minutes. 17Lands has no data for brand-new sets until players have logged games, and only FRA packs have been seen live; other sets are covered by unit tests and a simulated FDN draft (`python tools/simulate_draft.py --log X --set FDN`).
 - Log parsing was replayed line-by-line against real public Arena logs (Quick and Premier drafts, the formats this tool targets, from andreagrandi/draftomen test fixtures): every pick produced a refreshed pack (14, 13, 12... cards) and Quick Draft's completion cleared the pack. It has not yet been run against your own live Reality Fracture draft; if the page shows Waiting for a draft pack..., check Detailed Logs is enabled.
 - Ratings are aggregated opinions, not a pick for you; the page doesn't account for your colors so far (possible next step: use `PickedCards`).
 
@@ -54,7 +54,7 @@ deck list, so no library view.
 In game mode a bar at the bottom shows what the opponent could cast at instant
 speed right now: it counts the opponent's untapped lands (basic type, or the
 colour identity of non-basics), then lists (1) instants/flash cards they have
-already shown (battlefield, graveyard, exile, stack) and (2) Reality Fracture
+already shown (battlefield, graveyard, exile, stack) and (2) instants/flash creatures from the detected set
 instant/flash cards in their colours that their untapped mana can pay for.
 Greyed cards are shown but not currently affordable. Hover for a larger image.
 

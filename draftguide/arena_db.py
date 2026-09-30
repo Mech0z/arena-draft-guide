@@ -102,3 +102,13 @@ def load_land_colors(db_path: Path) -> dict[int, str]:
     finally:
         con.close()
     return {int(g): _letters(ci) for g, ci, types in rows if "5" in str(types).split(",")}
+
+
+def load_expansions(db_path: Path) -> dict[int, str]:
+    """GrpId -> expansion code (e.g. 'FDN') for primary, non-token cards."""
+    con = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
+    try:
+        rows = con.execute("SELECT GrpId, ExpansionCode FROM Cards WHERE IsPrimaryCard = 1 AND IsToken = 0").fetchall()
+    finally:
+        con.close()
+    return {int(g): str(code).upper() for g, code in rows if code}
