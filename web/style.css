@@ -52,3 +52,11 @@ main.library { display: flex; gap: 16px; padding: 8px 16px; grid-template-rows: 
 .icard .iname { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .icard .mana { margin:0; justify-content:center; }
 main.library { padding-bottom:34vh; }
+
+#instants { max-height:46vh; }
+#instants .ihead { font-size:14px; }
+.icard { width:150px; font-size:13px; }
+.icard img { width:150px; height:209px; object-fit:contain; border-radius:8px; }
+.icard .iname { font-weight:600; }
+.icard .pip { min-width:20px; height:20px; font-size:12px; }
+main.library { padding-bottom:46vh; }
