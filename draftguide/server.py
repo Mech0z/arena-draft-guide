@@ -6,11 +6,12 @@ import json
 import os
 import threading
 import time
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from . import archetypes, arena_db, instants, logparse, ratings
+from . import archetypes, arena_db, instants, logparse, ratings, sealed
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -25,8 +26,10 @@ def _norm(name: str) -> str:
 class Guide:
     def __init__(self, data: dict, names: dict[int, str], log_path: Path, demo: bool = False, lands: set[int] | None = None, details: dict | None = None,
                  instant_info: dict | None = None, land_colors: dict | None = None,
-                 expansions: dict | None = None, provider=None, archetype_dir: Path | None = None):
+                 expansions: dict | None = None, provider=None, archetype_dir: Path | None = None,
+                 colors: dict[int, str] | None = None):
         self.expansions = expansions or {}
+        self.colors = colors or {}
         self.provider = provider
         self.archetype_dir = archetype_dir or ROOT / "guides" / "archetypes"
         self.archetype_cache: dict[str, tuple[int, dict | None]] = {}
@@ -114,7 +117,9 @@ class Guide:
         return self.archetype_cache[code][1], modified
 
     def _image(self, grp: int) -> str:
-        name = self._name(grp)
+        return self._image_for_name(self._name(grp))
+
+    def _image_for_name(self, name: str) -> str:
         rated = self.by_name.get(_norm(name)) or self.by_name.get(_norm(name.split(" // ")[0]))
         if rated and rated.get("image"):
             return rated["image"]
@@ -153,6 +158,39 @@ class Guide:
             "instants": self.instant_view(game),
         }
 
+    def sealed_view(self, archetype_data: dict | None) -> dict | None:
+        observation = self.state.sealed_pool
+        if observation is None:
+            return None
+
+        cards_by_name = {}
+        for card_id, count in Counter(observation.card_ids).items():
+            card = self.lookup(card_id)
+            mana, type_line = self.details.get(card_id, ("", ""))
+            card["manaArena"] = card.get("manaArena") or mana
+            card["typeLine"] = card.get("typeLine") or type_line
+            colors = card.get("colors") or self.colors.get(card_id, "")
+            if isinstance(colors, str):
+                colors = list(colors)
+            card["colors"] = list(colors)
+            card["isLand"] = "land" in card["typeLine"].casefold()
+            card["count"] = count
+            key = _norm(card["name"])
+            if key in cards_by_name:
+                cards_by_name[key]["count"] += count
+            else:
+                cards_by_name[key] = card
+
+        cards = list(cards_by_name.values())
+        return {
+            "event": observation.event_name,
+            "cardCount": sum(card["count"] for card in cards),
+            "uniqueCount": len(cards),
+            "cards": cards,
+            "archetypes": sealed.analyze_archetypes(cards, archetype_data),
+            "scoreThresholds": {"bomb": 90, "strong": 80, "playable": 65},
+        }
+
     def instant_view(self, game) -> dict:
         view = instants.guide(game.opponent_lands(), game.opponent_seen_grp_ids(), self.instant_info, self.land_colors,
                               pool_set=self.current_set or self.default_set or "FRA")
@@ -175,11 +213,21 @@ class Guide:
         with self.lock:
             if self.demo:
                 top = sorted(self.data["cards"], key=lambda c: -(c["score"] or 0))[2:17]
-                cards, pack, version = [dict(c, unrated=False) for c in top], {"pack": 1, "pick": 1, "event": "Demo"}, 1
+                cards = []
+                for card in top:
+                    card = dict(card, unrated=False)
+                    if not card.get("image"):
+                        card["image"] = self._image_for_name(card["name"])
+                    cards.append(card)
+                pack, version = {"pack": 1, "pick": 1, "event": "Demo"}, 1
             else:
                 obs, version = self.state.pack, self.state.version
                 pack = None
                 cards = []
+                if self.state.sealed_pool:
+                    parsed = ratings.parse_event(self.state.sealed_pool.event_name)
+                    if parsed:
+                        self.current_fmt, self.current_set = parsed
                 if obs:
                     pack = {
                         "pack": None if obs.pack_number is None else obs.pack_number + 1,
@@ -197,10 +245,12 @@ class Guide:
             code = self.current_set or self.default_set
             ratings_data, _ = self._ratings_for(code, self.current_fmt) if not self.demo else (self.data, {})
             archetype_data, archetype_version = self._archetypes_for(code)
+            sealed_data = self.sealed_view(archetype_data)
             return {
                 "version": f"{version}.{self.state.game.version}.{archetype_version}",
                 "set": code,
                 "archetypes": archetype_data,
+                "sealedPool": sealed_data,
                 "game": self.game_view(),
                 "pack": pack,
                 "cards": cards,
@@ -267,11 +317,13 @@ def main(argv=None) -> int:
     if not names and not args.demo:
         print("Warning: Arena card database not found; pass --card-db or set MTGA_CARD_DB.")
     details = arena_db.load_details(db) if db else {}
+    colors = arena_db.load_colors(db) if db else {}
     instant_info = arena_db.load_instant_speed(db) if db else {}
     land_colors = arena_db.load_land_colors(db) if db else {}
     expansions = arena_db.load_expansions(db) if db else {}
     guide = Guide(data, names, args.log, demo=args.demo, lands=lands, details=details,
-                  instant_info=instant_info, land_colors=land_colors, expansions=expansions, provider=store.get)
+                  instant_info=instant_info, land_colors=land_colors, expansions=expansions, provider=store.get,
+                  colors=colors)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(guide))
     print(f"Draft guide on http://127.0.0.1:{args.port}  (log: {args.log})")
     try:

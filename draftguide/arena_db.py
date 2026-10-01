@@ -60,6 +60,16 @@ def load_details(db_path: Path) -> dict[int, tuple[str, str]]:
     return out
 
 
+def load_colors(db_path: Path) -> dict[int, str]:
+    """GrpId -> actual card colors (not color identity)."""
+    con = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
+    try:
+        rows = con.execute("SELECT GrpId, Colors FROM Cards").fetchall()
+    finally:
+        con.close()
+    return {int(grp): _letters(colors) for grp, colors in rows}
+
+
 def load_names(db_path: Path) -> dict[int, str]:
     return {grp: name for grp, (name, _land) in load_cards(db_path).items()}
 

@@ -13,10 +13,10 @@ from pathlib import Path
 PAGE_URL = "https://chunk.science/mtga-reality-fracture.html"
 DATA_RE = re.compile(r'/mtga-reality-fracture/data/fra\.[0-9a-f]+\.js[^"\']*')
 USER_AGENT = "arena-draft-guide/0.1 (personal local use)"
+BROWSER_USER_AGENT = "Mozilla/5.0 (compatible; arena-draft-guide/0.1)"
 
-
-def _get(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+def _get(url: str, user_agent: str = USER_AGENT) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": user_agent})
     with urllib.request.urlopen(req, timeout=60) as resp:
         return resp.read()
 
@@ -109,6 +109,17 @@ CARDGAMEBASE_URLS = {
     "FRA": "https://cardgamebase.com/reality-fracture-draft-tier-list/",
     "WOE": "https://cardgamebase.com/wilds-of-eldraine-draft-tier-list/",
 }
+DRAFTSIM_WOE_URL = "https://draftsim.com/mtg-woe-limited-set-review/"
+MTGAZONE_WOE_URLS = (
+    "https://mtgazone.com/wilds-of-eldraine-limited-set-review-white/",
+    "https://mtgazone.com/wilds-of-eldraine-limited-set-review-blue/",
+    "https://mtgazone.com/wilds-of-eldraine-limited-set-review-black/",
+    "https://mtgazone.com/wilds-of-eldraine-limited-set-review-red/",
+    "https://mtgazone.com/wilds-of-eldraine-limited-set-review-green/",
+    "https://mtgazone.com/wilds-of-eldraine-limited-set-review-artifacts-lands-and-multicolor-part-1/",
+    "https://mtgazone.com/wilds-of-eldraine-limited-set-review-multicolor-part-2/",
+    "https://mtgazone.com/wilds-of-eldraine-limited-set-review-enchanting-tales/",
+)
 # Ordinal UI scores preserve the grade order; they are not win-rate estimates.
 CARDGAMEBASE_GRADES = {
     "A+": 100, "A": 97, "A-": 94,
@@ -244,7 +255,14 @@ def parse_cardgamebase(html: str, code: str) -> dict:
             "colorRank": None,
             "colorRankOf": None,
             "signal": None,
-            "ratings": [{"source": "Card Game Base", "grade": grade, "score": score, "comment": f"Draft grade {grade}"}],
+            "ratings": [{
+                "source": "Card Game Base",
+                "grade": grade,
+                "score": score,
+                "scale": "A+ to F",
+                "sourceUrl": CARDGAMEBASE_URLS[code],
+                "comment": f"Draft grade {grade}",
+            }],
             "notes": [],
         })
     return {
@@ -261,8 +279,251 @@ def fetch_cardgamebase(code: str) -> dict:
     return parse_cardgamebase(_get(url).decode("utf-8"), code)
 
 
+def _rating_name_key(name: str) -> str:
+    import unicodedata
+    normalized = unicodedata.normalize("NFKD", name.split(" // ", 1)[0]).casefold()
+    return re.sub(r"[^a-z0-9]", "", normalized.encode("ascii", "ignore").decode("ascii"))
+
+
+class _DraftsimRatingsParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.in_heading = False
+        self.heading_parts: list[str] = []
+        self.card_name = ""
+        self.cards: list[tuple[str, float]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "h3":
+            self.in_heading = True
+            self.heading_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self.in_heading:
+            self.heading_parts.append(data)
+            return
+        match = re.search(r"Rating:\s*(\d+(?:\.\d+)?)\s*/\s*10", data, re.IGNORECASE)
+        if match and self.card_name:
+            self.cards.append((self.card_name, float(match.group(1))))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "h3" and self.in_heading:
+            self.card_name = " ".join("".join(self.heading_parts).split())
+            self.in_heading = False
+
+
+def parse_draftsim_woe(html: str) -> dict:
+    parser = _DraftsimRatingsParser()
+    parser.feed(html)
+    cards_by_key = {}
+    for name, grade in parser.cards:
+        key = _rating_name_key(name)
+        if not key:
+            continue
+        cards_by_key.setdefault(key, (name, grade))
+    if not cards_by_key:
+        raise RuntimeError("Could not find card grades in the Draftsim WOE review")
+    cards = []
+    for name, grade in cards_by_key.values():
+        cards.append({
+            "id": name,
+            "name": name,
+            "score": round(grade * 10),
+            "grade": grade,
+            "ratings": [{
+                "source": "Draftsim",
+                "grade": f"{grade:g}",
+                "score": round(grade * 10),
+                "scale": "0 to 10",
+                "sourceUrl": DRAFTSIM_WOE_URL,
+            }],
+        })
+    return {
+        "set": {"code": "WOE"},
+        "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "attribution": DRAFTSIM_WOE_URL,
+        "source": "Draftsim",
+        "cards": cards,
+    }
+
+
+def fetch_draftsim_woe() -> dict:
+    return parse_draftsim_woe(_get(DRAFTSIM_WOE_URL, BROWSER_USER_AGENT).decode("utf-8"),)
+
+
+class _MtgaZoneRatingsParser(HTMLParser):
+    def __init__(self, source_url: str):
+        super().__init__()
+        self.source_url = source_url
+        self.heading_tag: str | None = None
+        self.heading_parts: list[str] = []
+        self.card_name = ""
+        self.cards: list[tuple[str, float]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("h2", "h3"):
+            self.heading_tag = tag
+            self.heading_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self.heading_tag:
+            self.heading_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag != self.heading_tag:
+            return
+        text = " ".join("".join(self.heading_parts).split())
+        if tag == "h2":
+            self.card_name = text
+        elif (match := re.search(r"Rating:\s*(\d+(?:\.\d+)?)\s*/\s*5", text, re.IGNORECASE)):
+            self.cards.append((self.card_name, float(match.group(1))))
+        self.heading_tag = None
+
+
+def parse_mtgazone_woe_page(html: str, source_url: str) -> dict:
+    parser = _MtgaZoneRatingsParser(source_url)
+    parser.feed(html)
+    cards_by_key = {}
+    for name, grade in parser.cards:
+        key = _rating_name_key(name)
+        if not key:
+            continue
+        cards_by_key.setdefault(key, (name, grade))
+    cards = []
+    for name, grade in cards_by_key.values():
+        cards.append({
+            "id": name,
+            "name": name,
+            "score": round(grade * 20),
+            "grade": grade,
+            "ratings": [{
+                "source": "MTG Arena Zone",
+                "grade": f"{grade:.1f}",
+                "score": round(grade * 20),
+                "scale": "0.0 to 5.0",
+                "sourceUrl": source_url,
+            }],
+        })
+    return {"source": "MTG Arena Zone", "cards": cards}
+
+
+def fetch_mtgazone_woe() -> dict:
+    cards_by_key = {}
+    used_urls = []
+    for url in MTGAZONE_WOE_URLS:
+        html = _get(url, BROWSER_USER_AGENT).decode("utf-8")
+        page = parse_mtgazone_woe_page(html, url)
+        used_urls.append(url)
+        for card in page["cards"]:
+            cards_by_key.setdefault(_rating_name_key(card["name"]), card)
+    if not cards_by_key:
+        raise RuntimeError("Could not find card grades in the MTG Arena Zone WOE reviews")
+    return {
+        "set": {"code": "WOE"},
+        "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "attribution": MTGAZONE_WOE_URLS[0],
+        "sources": used_urls,
+        "source": "MTG Arena Zone",
+        "cards": list(cards_by_key.values()),
+    }
+
+
+def combine_woe_sources(sources: list[dict]) -> dict:
+    by_key = {}
+    coverage = {}
+    catalog_keys = {
+        _rating_name_key(card.get("name", ""))
+        for source_data in sources
+        if source_data.get("source") == "Card Game Base"
+        for card in source_data.get("cards", [])
+    }
+    for source_data in sources:
+        source_name = source_data.get("source") or (
+            "17Lands" if "17lands.com" in source_data.get("attribution", "") else "Unknown"
+        )
+        matched = set()
+        for source_card in source_data.get("cards", []):
+            key = _rating_name_key(source_card.get("name", ""))
+            if source_name == "17Lands" and key in by_key and source_card.get("image") and not by_key[key]["image"]:
+                by_key[key]["image"] = source_card["image"]
+            if not source_card.get("ratings"):
+                continue
+            if not key or (catalog_keys and source_name != "Card Game Base" and key not in catalog_keys):
+                continue
+            card = by_key.setdefault(key, {
+                "id": source_card.get("id", source_card["name"]),
+                "name": source_card["name"],
+                "collectorNumber": "",
+                "colors": [],
+                "manaCost": "",
+                "typeLine": "",
+                "rarity": "",
+                "image": source_card.get("image"),
+                "score": None,
+                "rank": None,
+                "rankOf": None,
+                "colorRank": None,
+                "colorRankOf": None,
+                "signal": None,
+                "ratings": [],
+                "notes": [],
+            })
+            existing = {rating["source"] for rating in card["ratings"]}
+            for rating in source_card.get("ratings", []):
+                if rating.get("source") in existing:
+                    continue
+                clean = {
+                    key: value for key, value in rating.items()
+                    if key != "comment" or rating.get("source") == "17Lands"
+                }
+                if clean["source"] == "Card Game Base":
+                    clean.setdefault("scale", "A+ to F")
+                    clean.setdefault("sourceUrl", CARDGAMEBASE_URLS["WOE"])
+                elif clean["source"] == "17Lands":
+                    clean.setdefault("scale", "GIH percentile")
+                    clean.setdefault("sourceUrl", source_data.get("attribution"))
+                card["ratings"].append(clean)
+                existing.add(clean["source"])
+                matched.add(key)
+        coverage[source_name] = len(matched)
+
+    cards = list(by_key.values())
+    for card in cards:
+        review_scores = [
+            rating["score"] for rating in card["ratings"]
+            if rating.get("source") != "17Lands" and rating.get("score") is not None
+        ]
+        empirical_scores = [rating["score"] for rating in card["ratings"] if rating.get("source") == "17Lands" and rating.get("score") is not None]
+        scores = review_scores or empirical_scores
+        card["score"] = round(sum(scores) / len(scores)) if scores else None
+        card["ratings"].sort(key=lambda rating: (
+            ("Card Game Base", "Draftsim", "MTG Arena Zone", "17Lands").index(rating["source"])
+            if rating["source"] in ("Card Game Base", "Draftsim", "MTG Arena Zone", "17Lands") else 99
+        ))
+
+    ranked = sorted((card for card in cards if card["score"] is not None), key=lambda card: (-card["score"], card["name"].casefold()))
+    for index, card in enumerate(ranked):
+        card["rank"] = len(ranked) - index
+        card["rankOf"] = len(ranked)
+    cards.sort(key=lambda card: (card["score"] is None, -(card["score"] or 0), card["name"].casefold()))
+    return {
+        "set": {"code": "WOE", "name": "Wilds of Eldraine"},
+        "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "attribution": CARDGAMEBASE_URLS["WOE"],
+        "source": "Multi-source ratings",
+        "sources": [
+            *([{"name": "Card Game Base", "url": CARDGAMEBASE_URLS["WOE"]}] if coverage.get("Card Game Base") else []),
+            *([{"name": "Draftsim", "url": DRAFTSIM_WOE_URL}] if coverage.get("Draftsim") else []),
+            *([{"name": "MTG Arena Zone", "urls": list(MTGAZONE_WOE_URLS)}] if coverage.get("MTG Arena Zone") else []),
+            *([{"name": "17Lands"}] if coverage.get("17Lands") else []),
+        ],
+        "sourceCoverage": coverage,
+        "cards": cards,
+    }
+
+
 class Store:
-    """Per-set ratings cache. FRA uses multi-source ratings; WOE uses Card Game Base."""
+    """Per-set rating caches, combining independent grades where available."""
 
     def __init__(self, cache_dir: Path, refresh: bool = False):
         self.cache_dir = cache_dir
@@ -272,6 +533,44 @@ class Store:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         return data
+
+    def _cached_source(self, cache_name: str, fetcher) -> dict:
+        cache = self.cache_dir / cache_name
+        if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:
+            return json.loads(cache.read_text(encoding="utf-8"))
+        try:
+            data = fetcher()
+        except Exception as exc:
+            if cache.exists():
+                print(f"Warning: rating source refresh failed for {cache_name} ({exc}); using cached data.")
+                return json.loads(cache.read_text(encoding="utf-8"))
+            raise
+        return self._write_cache(cache, data)
+
+    def _get_woe(self, fmt: str) -> dict:
+        cache = self.cache_dir / f"multi-source-WOE-{fmt}.json"
+        if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:
+            return json.loads(cache.read_text(encoding="utf-8"))
+
+        source_specs = [
+            ("Card Game Base", "cardgamebase-WOE.json", lambda: fetch_cardgamebase("WOE")),
+            ("Draftsim", "draftsim-WOE.json", fetch_draftsim_woe),
+            ("MTG Arena Zone", "mtgazone-WOE.json", fetch_mtgazone_woe),
+            ("17Lands", f"17l-WOE-{fmt}.json", lambda: fetch_17lands("WOE", fmt)),
+        ]
+        sources = []
+        for name, cache_name, fetcher in source_specs:
+            try:
+                data = self._cached_source(cache_name, fetcher)
+            except Exception as exc:
+                print(f"Warning: {name} WOE ratings unavailable ({exc}).")
+                continue
+            if name == "17Lands" and not any(card.get("ratings") for card in data.get("cards", [])):
+                print(f"Warning: 17Lands has no usable WOE ratings for {fmt}; keeping its image data only.")
+            sources.append(data)
+        if not sources:
+            raise RuntimeError("No WOE card-rating sources are currently available")
+        return self._write_cache(cache, combine_woe_sources(sources))
 
     def _get_fra(self) -> dict:
         cache = self.cache_dir / "multi-source-FRA.json"
@@ -297,6 +596,8 @@ class Store:
         code = code.upper()
         if code == "FRA":
             return self._get_fra()
+        if code == "WOE":
+            return self._get_woe(fmt)
         if code in CARDGAMEBASE_URLS:
             cache = self.cache_dir / f"cardgamebase-{code}.json"
             if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:

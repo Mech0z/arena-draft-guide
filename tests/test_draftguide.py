@@ -70,6 +70,29 @@ class ParseTests(unittest.TestCase):
             logparse.poll(state, log)
             self.assertIsNone(state.pack)
 
+    def test_nested_sealed_pool_preserves_duplicates(self):
+        event = {
+            "InternalEventName": "Sealed_FRA_20260929",
+            "CardPool": [{"GrpId": index} for index in range(1, 46)],
+        }
+        line = json.dumps({"payload": json.dumps({"Course": event})})
+        observation = logparse.parse_sealed_pool_line(line)
+        self.assertEqual(observation.event_name, "Sealed_FRA_20260929")
+        self.assertEqual(observation.card_ids, tuple(range(1, 46)))
+
+    def test_sealed_pool_updates_state_and_is_cleared_by_draft_pack(self):
+        state = logparse.DraftLogState()
+        sealed_line = json.dumps({
+            "InternalEventName": "TradSealed_FRA_20260929",
+            "CardPool": [101] * 40,
+        })
+        self.assertTrue(logparse.apply_lines(state, [sealed_line]))
+        self.assertEqual(len(state.sealed_pool.card_ids), 40)
+        self.assertIsNone(state.pack)
+        logparse.apply_lines(state, [BOT_PLAIN])
+        self.assertIsNone(state.sealed_pool)
+        self.assertIsNotNone(state.pack)
+
 
 class GuideTests(unittest.TestCase):
     def setUp(self):
@@ -87,6 +110,19 @@ class GuideTests(unittest.TestCase):
         self.assertEqual((snap["pack"]["pack"], snap["pack"]["pick"]), (2, 5))
         self.assertTrue(snap["cards"][2]["unrated"])
         json.dumps(snap)
+
+    def test_demo_pack_uses_image_fallback_for_unillustrated_ratings(self):
+        data = {
+            "set": {"code": "WOE"},
+            "cards": [
+                {"name": f"Card {index}", "score": 100 - index, "image": None}
+                for index in range(20)
+            ],
+        }
+        demo = Guide(data, {}, self.log, demo=True)
+        snapshot = demo.snapshot()
+        self.assertEqual(len(snapshot["cards"]), 15)
+        self.assertTrue(all(card["image"].startswith("https://api.scryfall.com/cards/named?") for card in snapshot["cards"]))
 
     def test_ratings_and_notes_carried(self):
         alpha = self.guide.snapshot()["cards"][0]
@@ -130,6 +166,38 @@ class GuideTests(unittest.TestCase):
         second = self.guide.snapshot()
         self.assertNotEqual(first["version"], second["version"])
         self.assertEqual(second["archetypes"]["archetypes"][0]["tier"], "D")
+
+    def test_sealed_pool_snapshot_enriches_cards_and_tier_fit(self):
+        guide_dir = Path(self.tmp.name) / "sealed-archetypes"
+        guide_dir.mkdir()
+        (guide_dir / "FRA.json").write_text(json.dumps({
+            "set": {"code": "FRA", "name": "Reality Fracture"},
+            "sources": [],
+            "archetypes": [
+                {"colors": ["W", "U"], "name": "Fatehold", "tier": "A"},
+                {"colors": ["B", "R"], "name": "Rift Aggro", "tier": "D"},
+            ],
+        }), encoding="utf-8")
+        self.guide.archetype_dir = guide_dir
+        self.guide.colors = {101: "WU", 102: "R"}
+        self.guide.details = {101: ("oU", "Creature — Faerie"), 102: ("oR", "Creature — Wizard")}
+        self.guide.state.sealed_pool = logparse.SealedObservation(
+            (101, 101, 102), "Sealed_FRA_20260929",
+        )
+        self.guide.state.offset = self.log.stat().st_size
+
+        snapshot = self.guide.snapshot()
+        pool = snapshot["sealedPool"]
+        self.assertEqual(pool["cardCount"], 3)
+        self.assertEqual(pool["uniqueCount"], 2)
+        beta = next(card for card in pool["cards"] if card["name"] == "Beta // Gamma")
+        self.assertEqual(beta["count"], 2)
+        self.assertEqual(beta["colors"], ["W", "U"])
+        self.assertEqual(beta["typeLine"], "Creature — Faerie")
+        self.assertEqual(snapshot["set"], "FRA")
+        fatehold = next(item for item in pool["archetypes"] if item["name"] == "Fatehold")
+        self.assertEqual(fatehold["tier"], "A")
+        json.dumps(snapshot)
 
 
 if __name__ == "__main__":
