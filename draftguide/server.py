@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
-from . import arena_db, instants, logparse, ratings
+from . import archetypes, arena_db, instants, logparse, ratings
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -25,9 +25,11 @@ def _norm(name: str) -> str:
 class Guide:
     def __init__(self, data: dict, names: dict[int, str], log_path: Path, demo: bool = False, lands: set[int] | None = None, details: dict | None = None,
                  instant_info: dict | None = None, land_colors: dict | None = None,
-                 expansions: dict | None = None, provider=None):
+                 expansions: dict | None = None, provider=None, archetype_dir: Path | None = None):
         self.expansions = expansions or {}
         self.provider = provider
+        self.archetype_dir = archetype_dir or ROOT / "guides" / "archetypes"
+        self.archetype_cache: dict[str, tuple[int, dict | None]] = {}
         self.indexes: dict[tuple[str, str], dict | None] = {}
         self.fail_until: dict[tuple[str, str], float] = {}
         self.current_set: str | None = None
@@ -95,10 +97,21 @@ class Guide:
         card = self.by_name.get(_norm(name)) or self.by_name.get(_norm(name.split(" // ")[0]))
         if card is None:
             return {"arenaId": card_id, "name": name, "unrated": True}
+        if not card.get("image"):
+            card = {**card, "image": self._image(card_id)}
         return {**card, "arenaId": card_id, "unrated": False}
 
     def _name(self, grp: int) -> str:
         return self.names.get(grp, f"Unknown card ({grp})")
+
+    def _archetypes_for(self, code: str | None) -> tuple[dict | None, int]:
+        code = (code or "").upper()
+        path = self.archetype_dir / f"{code}.json"
+        modified = path.stat().st_mtime_ns if path.is_file() else 0
+        cached = self.archetype_cache.get(code)
+        if cached is None or cached[0] != modified:
+            self.archetype_cache[code] = (modified, archetypes.load_set(self.archetype_dir, code))
+        return self.archetype_cache[code][1], modified
 
     def _image(self, grp: int) -> str:
         name = self._name(grp)
@@ -183,9 +196,11 @@ class Guide:
             cards.sort(key=lambda c: (c.get("unrated", False), -(c.get("score") or 0)))
             code = self.current_set or self.default_set
             ratings_data, _ = self._ratings_for(code, self.current_fmt) if not self.demo else (self.data, {})
+            archetype_data, archetype_version = self._archetypes_for(code)
             return {
-                "version": f"{version}.{self.state.game.version}",
+                "version": f"{version}.{self.state.game.version}.{archetype_version}",
                 "set": code,
+                "archetypes": archetype_data,
                 "game": self.game_view(),
                 "pack": pack,
                 "cards": cards,
@@ -196,7 +211,9 @@ class Guide:
                     "updatedAt": self.updated_at,
                     "ratingsGeneratedAt": ratings_data.get("generatedAt"),
                     "attribution": ratings_data.get("attribution"),
-                    "source": "17Lands" if "17lands" in (ratings_data.get("attribution") or "") else "chunk.science",
+                    "source": ratings_data.get("source") or (
+                        "17Lands" if "17lands" in (ratings_data.get("attribution") or "") else "chunk.science"
+                    ),
                     "ratingsAvailable": bool(ratings_data),
                 },
             }
@@ -262,7 +279,3 @@ def main(argv=None) -> int:
     except KeyboardInterrupt:
         pass
     return 0
-
-
-
-

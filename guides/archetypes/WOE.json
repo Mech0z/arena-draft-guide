@@ -1,0 +1,94 @@
+{
+  "set": {
+    "code": "WOE",
+    "name": "Wilds of Eldraine"
+  },
+  "sources": [
+    {
+      "name": "Untapped.gg tier list (2026-10-01 snapshot)",
+      "url": "https://mtga.untapped.gg/limited/draft/wilds-of-eldraine/tier-list"
+    }
+  ],
+  "archetypes": [
+    {
+      "colors": ["W", "U"],
+      "name": "Enchantments and Roles",
+      "focus": "Build around enchantments and Role tokens to enhance creatures and trigger enchantment payoffs.",
+      "tier": "D",
+      "sixPlusWinRate": 5.9,
+      "matches": 700
+    },
+    {
+      "colors": ["U", "B"],
+      "name": "Faeries",
+      "focus": "Use evasive Faeries and flash-speed interaction to pressure opponents while playing at instant speed.",
+      "tier": "D",
+      "sixPlusWinRate": 11.6,
+      "matches": 1400
+    },
+    {
+      "colors": ["B", "R"],
+      "name": "Rats",
+      "focus": "Go wide with Rats and use sacrifice or death synergies to turn expendable creatures into value.",
+      "tier": "A",
+      "sixPlusWinRate": 13.6,
+      "matches": 1800
+    },
+    {
+      "colors": ["R", "G"],
+      "name": "Celebration",
+      "focus": "Play multiple permanents in a turn to trigger Celebration and keep up an aggressive board.",
+      "tier": "A",
+      "sixPlusWinRate": 7.5,
+      "matches": 950
+    },
+    {
+      "colors": ["G", "W"],
+      "name": "Enchanted Creatures",
+      "focus": "Combine efficient creatures with enchantments and Roles for a resilient board with strong payoffs.",
+      "tier": "D",
+      "sixPlusWinRate": 6.7,
+      "matches": 840
+    },
+    {
+      "colors": ["W", "B"],
+      "name": "Bargain and Sacrifice",
+      "focus": "Bargain expendable tokens or permanents and gain value from sacrificing creatures.",
+      "tier": "C",
+      "sixPlusWinRate": 6.4,
+      "matches": 810
+    },
+    {
+      "colors": ["U", "R"],
+      "name": "Spells",
+      "focus": "Cast instants and sorceries to trigger spells-matter payoffs and maintain tempo.",
+      "tier": "D",
+      "sixPlusWinRate": 6.1,
+      "matches": 740
+    },
+    {
+      "colors": ["B", "G"],
+      "name": "Food and Bargain",
+      "focus": "Create Food and other expendable artifacts to support Bargain, life-gain, and sacrifice synergies.",
+      "tier": "A",
+      "sixPlusWinRate": 10.8,
+      "matches": 1400
+    },
+    {
+      "colors": ["R", "W"],
+      "name": "Aggro and Celebration",
+      "focus": "Curve out with creatures and use Celebration payoffs to reward developing your board each turn.",
+      "tier": "B",
+      "sixPlusWinRate": 12.9,
+      "matches": 1600
+    },
+    {
+      "colors": ["G", "U"],
+      "name": "Adventure Value",
+      "focus": "Use Adventure cards for flexible early plays and later creature value, backed by card selection.",
+      "tier": "D",
+      "sixPlusWinRate": 5.2,
+      "matches": 620
+    }
+  ]
+}

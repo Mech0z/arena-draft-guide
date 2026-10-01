@@ -1,6 +1,8 @@
 "use strict";
 const POLL_MS = 1000;
 let lastVersion = null;
+let currentState = null;
+let activeView = "draft";
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -25,7 +27,7 @@ function renderCard(card, isBest) {
   const body = el("div", "body");
   const head = el("div", "head");
   if (!card.unrated) {
-    const score = el("div", "score", card.score === null ? "–" : Math.round(card.score));
+    const score = el("div", "score", card.score === null ? "–" : (card.grade || Math.round(card.score)));
     if (card.score !== null) score.style.background = scoreColor(card.score);
     head.append(score);
   }
@@ -120,6 +122,136 @@ function renderInstants(ins) {
   box.append(row);
 }
 
+function setArchetypesOpen(open) {
+  const panel = document.getElementById("archetypes");
+  const toggle = document.getElementById("archetypes-toggle");
+  panel.hidden = !open;
+  document.body.classList.toggle("archetypes-open", open);
+  toggle.setAttribute("aria-expanded", String(open));
+}
+
+function archetypeTierRank(tier) {
+  if (tier === null || tier === undefined || tier === "") return Number.POSITIVE_INFINITY;
+  const value = String(tier).trim().toUpperCase().replace(/^TIER\s*/, "");
+  const tierOrder = ["S", "A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F"];
+  const letterRank = tierOrder.indexOf(value);
+  if (letterRank !== -1) return letterRank;
+  const numericTier = Number(value.replace(/^T/, ""));
+  return Number.isFinite(numericTier) ? 100 + numericTier : Number.POSITIVE_INFINITY;
+}
+
+function archetypeTierClass(tier) {
+  if (tier === null || tier === undefined || tier === "") return "tier-unrated";
+  const value = String(tier).trim().toUpperCase().replace(/^TIER\s*/, "");
+  if (["S", "A", "A+"].includes(value) || value === "1") return "tier-good";
+  if (["B", "B+"].includes(value) || value === "2") return "tier-okay";
+  if (["C", "C+", "B-"].includes(value) || value === "3") return "tier-mid";
+  if (["D", "D-", "D+", "F"].includes(value) || ["4", "5"].includes(value)) return "tier-bad";
+  return "tier-unrated";
+}
+
+function compareArchetypes(a, b) {
+  const tierA = archetypeTierRank(a.tier);
+  const tierB = archetypeTierRank(b.tier);
+  if (tierA !== tierB) return tierA < tierB ? -1 : 1;
+  const winRateDifference = (b.sixPlusWinRate ?? -1) - (a.sixPlusWinRate ?? -1);
+  if (winRateDifference) return winRateDifference;
+  return (b.matches ?? -1) - (a.matches ?? -1);
+}
+
+function renderArchetypes(guide, inGame) {
+  const panel = document.getElementById("archetypes");
+  const toggle = document.getElementById("archetypes-toggle");
+  const wasOpen = !panel.hidden;
+  panel.replaceChildren();
+  toggle.hidden = inGame || activeView === "tiers" || !guide || !guide.archetypes || !guide.archetypes.length;
+  if (toggle.hidden) {
+    setArchetypesOpen(false);
+    return;
+  }
+
+  const header = el("div", "archetypes-head");
+  header.append(el("div", "archetypes-title", `${guide.set.name} archetypes`));
+  const close = el("button", "", "Close");
+  close.type = "button";
+  close.addEventListener("click", () => { panel.hidden = true; });
+  header.append(close);
+  panel.append(header);
+
+  const list = el("div", "archetype-list");
+  const sorted = guide.archetypes.map((archetype, index) => ({ archetype, index }))
+    .sort((a, b) => compareArchetypes(a.archetype, b.archetype) || a.index - b.index);
+  for (const { archetype } of sorted) {
+    const card = el("article", "archetype");
+    const top = el("div", "archetype-top");
+    top.append(manaEl(archetype.colors.map((color) => "o" + color).join("")), el("h2", "", archetype.name));
+    const tierLabel = archetype.tier ? (/^tier\b/i.test(String(archetype.tier)) ? archetype.tier : "Tier " + archetype.tier) : "No tier";
+    top.append(el("span", "archetype-tier " + archetypeTierClass(archetype.tier), tierLabel));
+    if (archetype.tierSource) {
+      const link = el("a", "tier-source", "source");
+      link.href = archetype.tierSource;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      top.append(link);
+    }
+    card.append(top);
+    if (archetype.sixPlusWinRate !== undefined || archetype.matches !== undefined) {
+      const stats = el("div", "archetype-stats");
+      if (archetype.sixPlusWinRate !== undefined) stats.append(el("span", "", `6+ wins ${archetype.sixPlusWinRate.toFixed(1)}%`));
+      if (archetype.matches !== undefined) stats.append(el("span", "", `${archetype.matches.toLocaleString()} matches`));
+      card.append(stats);
+    }
+    card.append(el("p", "", archetype.focus));
+    list.append(card);
+  }
+  panel.append(list);
+
+  if (guide.sources && guide.sources.length) {
+    const sources = el("div", "archetype-sources");
+    sources.append(document.createTextNode("Sources: "));
+    guide.sources.forEach((source, i) => {
+      if (i) sources.append(document.createTextNode(" · "));
+      const link = el("a", "", source.name);
+      link.href = source.url;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      sources.append(link);
+    });
+    panel.append(sources);
+  }
+  setArchetypesOpen(wasOpen);
+}
+
+function renderColorTiers(guide) {
+  const cards = document.getElementById("cards");
+  cards.className = "tier-list-view";
+  cards.replaceChildren();
+  const table = el("table", "tier-table");
+  const head = el("thead");
+  const header = el("tr");
+  for (const label of ["Tier", "Colors", "Archetype", "6+ wins", "Matches"]) {
+    header.append(el("th", "", label));
+  }
+  head.append(header);
+  table.append(head);
+
+  const body = el("tbody");
+  const sorted = guide.archetypes.map((archetype, index) => ({ archetype, index }))
+    .sort((a, b) => compareArchetypes(a.archetype, b.archetype) || a.index - b.index);
+  for (const { archetype } of sorted) {
+    const row = el("tr");
+    row.append(el("td", "tier-rating " + archetypeTierClass(archetype.tier), archetype.tier ? "Tier " + archetype.tier : "—"));
+    const colors = el("td");
+    colors.append(manaEl(archetype.colors.map((color) => "o" + color).join("")));
+    row.append(colors, el("td", "", archetype.name));
+    row.append(el("td", "", archetype.sixPlusWinRate === undefined ? "—" : archetype.sixPlusWinRate.toFixed(1) + "%"));
+    row.append(el("td", "", archetype.matches === undefined ? "—" : archetype.matches.toLocaleString()));
+    body.append(row);
+  }
+  table.append(body);
+  cards.append(table);
+}
+
 function renderLibrary(state) {
   renderInstants(state.game.instants);
   const g = state.game;
@@ -153,9 +285,17 @@ function renderLibrary(state) {
 }
 
 function render(state) {
+  currentState = state;
   preview.hide();
+  renderArchetypes(state.archetypes, Boolean(state.game));
+  const tabs = document.getElementById("draft-tabs");
+  tabs.hidden = Boolean(state.game) || !state.archetypes || !state.archetypes.archetypes.length;
   if (!state.game) renderInstants(null);
-  if (state.game) return renderLibrary(state);
+  if (state.game) {
+    activeView = "draft";
+    return renderLibrary(state);
+  }
+  if (activeView === "tiers" && state.archetypes) return renderColorTiers(state.archetypes);
   document.getElementById("cards").className = "";
   const cards = document.getElementById("cards");
   cards.replaceChildren();
@@ -208,3 +348,17 @@ async function tick() {
 tick();
 setInterval(tick, POLL_MS);
 
+document.getElementById("archetypes-toggle").addEventListener("click", () => {
+  const panel = document.getElementById("archetypes");
+  setArchetypesOpen(panel.hidden);
+});
+
+document.getElementById("draft-tabs").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-view]");
+  if (!button || !currentState) return;
+  activeView = button.dataset.view;
+  document.querySelectorAll("#draft-tabs [role=tab]").forEach((tab) => {
+    tab.setAttribute("aria-selected", String(tab === button));
+  });
+  render(currentState);
+});

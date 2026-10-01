@@ -1,4 +1,4 @@
-"""Fetch and slim the chunk.science Reality Fracture rating data (cached locally, never committed)."""
+"""Fetch and cache draft ratings from Card Game Base, chunk.science, and 17Lands."""
 from __future__ import annotations
 
 import json
@@ -7,6 +7,7 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 
 PAGE_URL = "https://chunk.science/mtga-reality-fracture.html"
@@ -86,13 +87,24 @@ def load(cache: Path, refresh: bool = False) -> dict:
     cache.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     return data
 
-# --- any set: 17Lands card ratings (used when chunk.science has no page for the set) ---
+# --- any set: 17Lands card ratings ---
 
-CHUNK_SETS = {"FRA"}
 LANDS17_URL = "https://www.17lands.com/card_ratings/data?expansion={code}&format={fmt}"
 LANDS17_PAGE = "https://www.17lands.com/card_ratings"
 MIN_GAMES = 200
 CACHE_TTL = 12 * 3600
+CARDGAMEBASE_URLS = {
+    "FRA": "https://cardgamebase.com/reality-fracture-draft-tier-list/",
+    "WOE": "https://cardgamebase.com/wilds-of-eldraine-draft-tier-list/",
+}
+# Ordinal UI scores preserve the grade order; they are not win-rate estimates.
+CARDGAMEBASE_GRADES = {
+    "A+": 100, "A": 97, "A-": 94,
+    "B+": 89, "B": 86, "B-": 83,
+    "C+": 78, "C": 75, "C-": 72,
+    "D+": 67, "D": 64, "D-": 61,
+    "F": 30,
+}
 _EVENT_RE = re.compile(r"^(?P<fmt>[A-Za-z]+?)_(?P<code>[A-Za-z0-9]{2,6})_")
 _FORMATS = {"PremierDraft", "QuickDraft", "TradDraft", "Sealed", "TradSealed", "PickTwoDraft"}
 
@@ -156,8 +168,89 @@ def fetch_17lands(code: str, fmt: str) -> dict:
     return slim_17lands(json.loads(_get(url).decode("utf-8")), code, fmt)
 
 
+class _TierTableParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.table_depth = 0
+        self.row: list[str] | None = None
+        self.cell: list[str] | None = None
+        self.cards: list[tuple[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "table":
+            if self.table_depth or "tierlist" in (attributes.get("class") or "").split():
+                self.table_depth += 1
+        elif self.table_depth and tag == "tr":
+            self.row = []
+        elif self.table_depth and tag in ("td", "th"):
+            self.cell = []
+
+    def handle_data(self, data: str) -> None:
+        if self.cell is not None:
+            self.cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self.table_depth:
+            return
+        if tag in ("td", "th") and self.cell is not None:
+            self.row.append(" ".join("".join(self.cell).split()))
+            self.cell = None
+        elif tag == "tr" and self.row is not None:
+            if len(self.row) >= 2 and self.row[1] in CARDGAMEBASE_GRADES:
+                self.cards.append((self.row[0], self.row[1]))
+            self.row = None
+        elif tag == "table":
+            self.table_depth -= 1
+
+
+def parse_cardgamebase(html: str, code: str) -> dict:
+    parser = _TierTableParser()
+    parser.feed(html)
+    if not parser.cards:
+        raise RuntimeError(f"Could not find card grades for {code} on Card Game Base")
+
+    ranked = sorted(parser.cards, key=lambda item: (-CARDGAMEBASE_GRADES[item[1]], item[0].casefold()))
+    rank_by_name = {name: len(ranked) - index for index, (name, _grade) in enumerate(ranked)}
+    rank_of = len(ranked)
+    cards = []
+    for name, grade in parser.cards:
+        score = CARDGAMEBASE_GRADES[grade]
+        cards.append({
+            "id": name,
+            "name": name,
+            "collectorNumber": "",
+            "colors": [],
+            "manaCost": "",
+            "typeLine": "",
+            "rarity": "",
+            "image": None,
+            "score": score,
+            "grade": grade,
+            "rank": rank_by_name[name],
+            "rankOf": rank_of,
+            "colorRank": None,
+            "colorRankOf": None,
+            "signal": None,
+            "ratings": [{"source": "Card Game Base", "grade": grade, "score": score, "comment": f"Draft grade {grade}"}],
+            "notes": [],
+        })
+    return {
+        "set": {"code": code},
+        "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "attribution": CARDGAMEBASE_URLS[code],
+        "source": "Card Game Base",
+        "cards": cards,
+    }
+
+
+def fetch_cardgamebase(code: str) -> dict:
+    url = CARDGAMEBASE_URLS[code]
+    return parse_cardgamebase(_get(url).decode("utf-8"), code)
+
+
 class Store:
-    """Per-set rating data with an on-disk cache. FRA uses chunk.science; every other set uses 17Lands."""
+    """Per-set ratings cache. FRA and WOE use Card Game Base; other sets use 17Lands."""
 
     def __init__(self, cache_dir: Path, refresh: bool = False):
         self.cache_dir = cache_dir
@@ -165,8 +258,19 @@ class Store:
 
     def get(self, code: str, fmt: str = "PremierDraft") -> dict:
         code = code.upper()
-        if code in CHUNK_SETS:
-            return load(self.cache_dir / f"{code.lower()}.json", refresh=self.refresh)
+        if code in CARDGAMEBASE_URLS:
+            cache = self.cache_dir / f"cardgamebase-{code}.json"
+            if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:
+                return json.loads(cache.read_text(encoding="utf-8"))
+            try:
+                data = fetch_cardgamebase(code)
+            except Exception:
+                if cache.exists():
+                    return json.loads(cache.read_text(encoding="utf-8"))
+                raise
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            cache.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            return data
         cache = self.cache_dir / f"17l-{code}-{fmt}.json"
         if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:
             return json.loads(cache.read_text(encoding="utf-8"))

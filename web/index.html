@@ -10,11 +10,17 @@
 <header>
   <h1 id="title">Draft guide</h1>
   <div id="pickinfo"></div>
+  <button id="archetypes-toggle" type="button" aria-expanded="false" aria-controls="archetypes" hidden>Archetypes</button>
   <div id="status"></div>
 </header>
+<nav id="draft-tabs" role="tablist" aria-label="Draft guide views" hidden>
+  <button type="button" role="tab" data-view="draft" aria-selected="true">Draft picks</button>
+  <button type="button" role="tab" data-view="tiers" aria-selected="false">Color tiers</button>
+</nav>
 <main id="cards"></main>
+<aside id="archetypes" hidden aria-label="Draft archetypes"></aside>
 <section id="instants" hidden></section>
-<footer>Ratings: <a id="attr" href="#" target="_blank" rel="noreferrer">chunk.science</a> (FRA: aggregate of public reviewers; other sets: 17Lands win rates). Auto-refreshes.</footer>
+<footer>Ratings: <a id="attr" href="#" target="_blank" rel="noreferrer">Card Game Base</a> (FRA and WOE: draft grades; other sets: 17Lands win rates). Auto-refreshes.</footer>
 <script src="app.js"></script>
 </body>
 </html>

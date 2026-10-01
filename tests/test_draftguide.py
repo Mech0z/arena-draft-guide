@@ -1,4 +1,5 @@
 ﻿import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -97,6 +98,27 @@ class GuideTests(unittest.TestCase):
         with self.log.open("a", encoding="utf-8") as f:
             f.write(BOT_PLAIN + "\n")
         self.assertGreater(self.guide.snapshot()["version"], v)
+
+    def test_archetypes_are_attached_for_current_set(self):
+        guide_dir = Path(self.tmp.name) / "archetypes"
+        guide_dir.mkdir()
+        (guide_dir / "FRA.json").write_text(json.dumps({
+            "set": {"code": "FRA", "name": "Reality Fracture"},
+            "sources": [],
+            "archetypes": [{"colors": ["W", "U"], "name": "Fatehold", "focus": "Scry.", "tier": None}],
+        }), encoding="utf-8")
+        self.guide.archetype_dir = guide_dir
+        first = self.guide.snapshot()
+        self.assertEqual(first["archetypes"]["archetypes"][0]["name"], "Fatehold")
+        guide_path = guide_dir / "FRA.json"
+        updated = json.loads(guide_path.read_text(encoding="utf-8"))
+        updated["archetypes"][0]["tier"] = "D"
+        guide_path.write_text(json.dumps(updated), encoding="utf-8")
+        stat = guide_path.stat()
+        os.utime(guide_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+        second = self.guide.snapshot()
+        self.assertNotEqual(first["version"], second["version"])
+        self.assertEqual(second["archetypes"]["archetypes"][0]["tier"], "D")
 
 
 if __name__ == "__main__":

@@ -35,6 +35,32 @@ class MultiSetTests(unittest.TestCase):
         self.assertEqual(by["Alpha"]["image"], "http://x/a.jpg")
         self.assertIn("GIH WR 60.0%", by["Alpha"]["ratings"][0]["comment"])
 
+    def test_parse_cardgamebase(self):
+        html = """
+        <table class="tablepress tierlist"><tbody>
+          <tr><th>White</th><th>Grade</th></tr>
+          <tr><td><a>Minecart Daredevil // Ride the Rails</a></td><td>C+</td></tr>
+          <tr><td><a>Kindred Judgment</a></td><td>A-</td></tr>
+        </tbody></table>
+        <table class="unrelated"><tr><td>Wrong Card</td><td>A+</td></tr></table>
+        """
+        data = ratings.parse_cardgamebase(html, "WOE")
+        by = {card["name"]: card for card in data["cards"]}
+        self.assertEqual(by["Minecart Daredevil // Ride the Rails"]["grade"], "C+")
+        self.assertEqual(by["Minecart Daredevil // Ride the Rails"]["score"], 78)
+        self.assertEqual(by["Kindred Judgment"]["rank"], 2)
+        self.assertEqual(data["source"], "Card Game Base")
+        self.assertEqual(len(data["cards"]), 2)
+        guide = Guide(data, {8: "Minecart Daredevil"}, Path(tempfile.mkdtemp()) / "Player.log")
+        match = guide.lookup(8)
+        self.assertEqual(match["grade"], "C+")
+        self.assertFalse(match["unrated"])
+        self.assertIn("scryfall.com/cards/named?format=image", match["image"])
+
+    def test_parse_cardgamebase_requires_tier_table(self):
+        with self.assertRaisesRegex(RuntimeError, "Could not find card grades"):
+            ratings.parse_cardgamebase("<table><tr><td>Unrelated</td><td>A</td></tr></table>", "FRA")
+
     def _guide(self, calls, fail=False):
         def provider(code, fmt):
             calls.append((code, fmt))
@@ -82,6 +108,11 @@ class MultiSetTests(unittest.TestCase):
         d = Path(tempfile.mkdtemp())
         (d / "17l-FDN-PremierDraft.json").write_text(json.dumps({"cards": [], "set": {"code": "FDN"}}))
         self.assertEqual(ratings.Store(d).get("FDN")["set"]["code"], "FDN")
+
+    def test_store_uses_cardgamebase_set_cache(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "cardgamebase-WOE.json").write_text(json.dumps({"cards": [], "set": {"code": "WOE"}}))
+        self.assertEqual(ratings.Store(d).get("WOE", "QuickDraft")["set"]["code"], "WOE")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 ﻿# Arena draft guide (any draft set)
 
-A local, auto-refreshing web page for a second monitor. While you draft in MTG Arena it shows the cards in your current pack with card art, aggregate rating, per-reviewer grades, and written comments/notes from [chunk.science's Reality Fracture tier list](https://chunk.science/mtga-reality-fracture.html). The best-rated card is outlined green and the pack is sorted best-first.
+A local, auto-refreshing web page for a second monitor. While you draft in MTG Arena it shows the cards in your current pack with card art and draft ratings. Wilds of Eldraine and Reality Fracture use card grades from [Card Game Base](https://cardgamebase.com/wilds-of-eldraine-draft-tier-list/) and [Reality Fracture's tier list](https://cardgamebase.com/reality-fracture-draft-tier-list/); other sets use 17Lands.
 
 ## Run
 
@@ -16,12 +16,13 @@ In Arena: Options > Account > enable **Detailed Logs (Plugin Support)**, then re
 ## How it works
 
 - Read-only: tails `Player.log` for `DraftPack` payloads (Quick and Premier draft share this same code path; Traditional and Pick-Two use it too) and, as a fallback, `Draft.Notify` `PackCards` lines; maps Arena card ids to names from the game's local card database (opened read-only). No input is sent to Arena, no memory or network access to the game.
-- Ratings are downloaded once from chunk.science into `data/fra.json` (git-ignored; the site is "all rights reserved", so the data is not redistributed here). Refresh with `--refresh-ratings`. Card images load from Scryfall in your browser.
+- Ratings are cached as per-set JSON files under `data/` (git-ignored, not redistributed). FRA and WOE Card Game Base grades refresh every 12 hours; use `--refresh-ratings` to fetch them again. Card images load from Scryfall in your browser.
+- Curated Limited archetype guides are stored as `guides/archetypes/<SET>.json`, separately from the ignored rating cache. During a draft, use **Color tiers** for the sorted color-pair ratings, or toggle the **Archetypes** sidebar for themes and sources. Guide JSON is reloaded when its file changes. Archetypes with a `tier` value sort highest-first; entries without a tier remain at the end.
 - The page polls `/api/state` every second and redraws when a new pack arrives.
 
 ## Limits
 
-- Works for any set: the set and format are read from the draft's event name (Premier/Quick/Traditional) and, in games, from the expansion codes in your deck. Reality Fracture (FRA) uses chunk.science; every other set uses 17Lands win-rate data (score = percentile of games-in-hand win rate among cards with 200+ games, cached in `data/17l-<SET>-<format>.json` for 12h). Cards without enough data show "Not enough data" with art and mana cost; if 17Lands is unreachable, cards show unrated and retry after 5 minutes. 17Lands has no data for brand-new sets until players have logged games, and only FRA packs have been seen live; other sets are covered by unit tests and a simulated FDN draft (`python tools/simulate_draft.py --log X --set FDN`).
+- Works for any set: the set and format are read from the draft's event name (Premier/Quick/Traditional) and, in games, from the expansion codes in your deck. FRA and WOE use Card Game Base letter grades (A+ through F), cached as `data/cardgamebase-<SET>.json`; other sets use 17Lands win-rate data (score = percentile of games-in-hand win rate among cards with 200+ games, cached in `data/17l-<SET>-<format>.json` for 12h). Cards without a published Card Game Base grade appear unrated; 17Lands cards without enough data show "Not enough data" with art and mana cost. If a source is unreachable, cached ratings are used when available, otherwise cards show unrated and retry after 5 minutes. 17Lands has no data for brand-new sets until players have logged games, and only FRA packs have been seen live; other sets are covered by unit tests and a simulated FDN draft (`python tools/simulate_draft.py --log X --set FDN`).
 - Log parsing was replayed line-by-line against real public Arena logs (Quick and Premier drafts, the formats this tool targets, from andreagrandi/draftomen test fixtures): every pick produced a refreshed pack (14, 13, 12... cards) and Quick Draft's completion cleared the pack. It has not yet been run against your own live Reality Fracture draft; if the page shows Waiting for a draft pack..., check Detailed Logs is enabled.
 - Ratings are aggregated opinions, not a pick for you; the page doesn't account for your colors so far (possible next step: use `PickedCards`).
 
@@ -36,7 +37,7 @@ In Arena: Options > Account > enable **Detailed Logs (Plugin Support)**, then re
 
 When a match starts, the page switches to a library view: every card still in
 your library, its count and the chance to draw it next. Hovering a row shows
-the card image (Scryfall, or the chunk.science image for FRA cards). After the
+the card image from Scryfall. After the
 game ends it falls back to the draft view.
 
 How it works: the library is hidden in the log, so it is derived as your

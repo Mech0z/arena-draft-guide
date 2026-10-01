@@ -1,0 +1,102 @@
+{
+  "set": {
+    "code": "FRA",
+    "name": "Reality Fracture"
+  },
+  "sources": [
+    {
+      "name": "Draftsim",
+      "url": "https://draftsim.com/mtg-fra-draft-archetypes/"
+    },
+    {
+      "name": "Wizards of the Coast",
+      "url": "https://magic.wizards.com/en/news/making-magic/reality-check-part-2"
+    },
+    {
+      "name": "Untapped.gg tier list (2026-10-01 snapshot)",
+      "url": "https://mtga.untapped.gg/limited/draft/reality-fracture/tier-list"
+    }
+  ],
+  "archetypes": [
+    {
+      "colors": ["W", "U"],
+      "name": "Fatehold Scry/Surveil",
+      "focus": "Scry and surveil to enable card selection, graveyard setup, and payoffs.",
+      "tier": "A",
+      "sixPlusWinRate": 10.5,
+      "matches": 14000
+    },
+    {
+      "colors": ["U", "B"],
+      "name": "Theorix Self-Mill/Threshold",
+      "focus": "Fill your graveyard with self-mill to turn on threshold and other graveyard payoffs.",
+      "tier": "A",
+      "sixPlusWinRate": 9.3,
+      "matches": 12000
+    },
+    {
+      "colors": ["B", "R"],
+      "name": "Stingerquill Aggro/Burn",
+      "focus": "Pressure opponents with aggressive creatures and direct damage, with spells-matter synergies.",
+      "tier": "B",
+      "sixPlusWinRate": 8.5,
+      "matches": 11000
+    },
+    {
+      "colors": ["R", "G"],
+      "name": "Konstrari Artifacts/Ramp",
+      "focus": "Make mana-producing artifact tokens to accelerate into larger threats and artifact payoffs.",
+      "tier": "A",
+      "sixPlusWinRate": 10.4,
+      "matches": 14000
+    },
+    {
+      "colors": ["G", "W"],
+      "name": "Vigorbloom Lifegain/Counters",
+      "focus": "Gain life and grow creatures with +1/+1 counters.",
+      "tier": "C",
+      "sixPlusWinRate": 11.4,
+      "matches": 15000
+    },
+    {
+      "colors": ["W", "B"],
+      "name": "Liliana's Attrition",
+      "focus": "Reuse small creatures from the graveyard and turn sacrifice effects into an attrition plan.",
+      "tier": "A",
+      "sixPlusWinRate": 4.8,
+      "matches": 6500
+    },
+    {
+      "colors": ["G", "U"],
+      "name": "Jace's Mastery",
+      "focus": "Empower Jace for card advantage and build around planeswalker synergies.",
+      "tier": "C",
+      "sixPlusWinRate": 3.1,
+      "matches": 4100
+    },
+    {
+      "colors": ["R", "W"],
+      "name": "Ajani's Army",
+      "focus": "Build an aggressive creature board and strengthen it with +1/+1 counters.",
+      "tier": "C",
+      "sixPlusWinRate": 5.2,
+      "matches": 6800
+    },
+    {
+      "colors": ["U", "R"],
+      "name": "Chandra's Prowess",
+      "focus": "Cast noncreature spells to trigger creature abilities and maintain pressure.",
+      "tier": "B",
+      "sixPlusWinRate": 7.5,
+      "matches": 9900
+    },
+    {
+      "colors": ["B", "G"],
+      "name": "Garruk's Bestiary",
+      "focus": "Deploy large creatures and use deathtouch and trample to push through blockers.",
+      "tier": "B",
+      "sixPlusWinRate": 5.9,
+      "matches": 7900
+    }
+  ]
+}
