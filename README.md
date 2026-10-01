@@ -1,6 +1,6 @@
 ﻿# Arena draft guide (any draft set)
 
-A local, auto-refreshing web page for a second monitor. While you draft in MTG Arena it shows the cards in your current pack with card art, aggregate rating, per-reviewer grades, and written comments/notes from [chunk.science's Reality Fracture tier list](https://chunk.science/mtga-reality-fracture.html). The best-rated card is outlined green and the pack is sorted best-first.
+A local, auto-refreshing web page for a second monitor. While you draft in MTG Arena it shows the cards in your current pack with card art and draft ratings. Reality Fracture and Wilds of Eldraine combine available grades from multiple Limited reviewers; other sets use 17Lands.
 
 ## Run
 
@@ -16,13 +16,17 @@ In Arena: Options > Account > enable **Detailed Logs (Plugin Support)**, then re
 ## How it works
 
 - Read-only: tails `Player.log` for `DraftPack` payloads (Quick and Premier draft share this same code path; Traditional and Pick-Two use it too) and, as a fallback, `Draft.Notify` `PackCards` lines; maps Arena card ids to names from the game's local card database (opened read-only). No input is sent to Arena, no memory or network access to the game.
-- Ratings are downloaded once from chunk.science into `data/fra.json` (git-ignored; the site is "all rights reserved", so the data is not redistributed here). Refresh with `--refresh-ratings`. Card images load from Scryfall in your browser.
+- Ratings are cached as per-set JSON files under `data/` (git-ignored, not redistributed). FRA's feed includes Draftsim, MTG Arena Zone, Card Game Base, and other reviewers. WOE combines Card Game Base letter grades, Draftsim 0–10 grades, and MTG Arena Zone 0–5 grades; available 17Lands data is also shown separately from the reviewer consensus. Individual native grades and source links appear alongside the consensus score. Ratings refresh every 12 hours; use `--refresh-ratings` to fetch them again. Card images load from Scryfall in your browser.
+- Curated Limited archetype guides are stored as `guides/archetypes/<SET>.json`, separately from the ignored rating cache. During a draft, use **Color tiers** for the sorted color-pair ratings, or toggle the **Archetypes** sidebar for themes and sources. Guide JSON is reloaded when its file changes. Archetypes with a `tier` value sort highest-first; entries without a tier remain at the end.
+- When Arena logs a sealed course's `CardPool`, the guide opens a **Sealed pool** view with the complete pool grouped by color and showing available card grades. It compares each two-color pool against its set archetype tier and summarizes bombs (score 90+), strong cards (80+), and playables (65+). Each archetype's **Show eligible cards** button filters the pool to that color pair; **Show full pool** restores it. Those thresholds and deck-fit labels are heuristics, not deck recommendations; colorless spells count toward every pair, multicolor cards only count when all their colors fit, and lands are excluded from archetype counts.
+- The FRA feed currently exposes per-card grades for Draftsim, MTG Arena Zone, Card Game Base, and additional reviewers. The supplied Untapped.gg and TCGplayer pages do not provide ratings through this feed and are not included.
 - The page polls `/api/state` every second and redraws when a new pack arrives.
 
 ## Limits
 
-- Works for any set: the set and format are read from the draft's event name (Premier/Quick/Traditional) and, in games, from the expansion codes in your deck. Reality Fracture (FRA) uses chunk.science; every other set uses 17Lands win-rate data (score = percentile of games-in-hand win rate among cards with 200+ games, cached in `data/17l-<SET>-<format>.json` for 12h). Cards without enough data show "Not enough data" with art and mana cost; if 17Lands is unreachable, cards show unrated and retry after 5 minutes. 17Lands has no data for brand-new sets until players have logged games, and only FRA packs have been seen live; other sets are covered by unit tests and a simulated FDN draft (`python tools/simulate_draft.py --log X --set FDN`).
+- Works for any set: the set and format are read from the draft's event name (Premier/Quick/Traditional) and, in games, from the expansion codes in your deck. FRA combines available numeric grades from the multi-source feed and shows each original reviewer grade in `data/multi-source-FRA.json`. WOE combines Card Game Base, Draftsim, and MTG Arena Zone grades, averages those normalized reviewer scores, and shows each source's native scale; it also adds 17Lands' empirical grade when that endpoint has usable data. Combined data is cached by format in `data/multi-source-WOE-<format>.json`, with individual source caches alongside it. Other sets use 17Lands win-rate data (score = percentile of games-in-hand win rate among cards with 200+ games, cached in `data/17l-<SET>-<format>.json` for 12h). Cards without an available review grade appear unrated; cards without enough statistical data show "Not enough data" with art and mana cost. If a source is unreachable, cached ratings are used when available, otherwise its grades are omitted and the server logs a warning. 17Lands may have no current data for older sets or brand-new sets; only FRA packs have been seen live, and other sets are covered by unit tests and a simulated FDN draft (`python tools/simulate_draft.py --log X --set FDN`).
 - Log parsing was replayed line-by-line against real public Arena logs (Quick and Premier drafts, the formats this tool targets, from andreagrandi/draftomen test fixtures): every pick produced a refreshed pack (14, 13, 12... cards) and Quick Draft's completion cleared the pack. It has not yet been run against your own live Reality Fracture draft; if the page shows Waiting for a draft pack..., check Detailed Logs is enabled.
+- Sealed-pool detection expects a logged sealed course response with an `InternalEventName` containing `Sealed` and at least 40 `CardPool` entries. This parser path has synthetic test coverage but has not yet been verified against a live Arena sealed log.
 - Ratings are aggregated opinions, not a pick for you; the page doesn't account for your colors so far (possible next step: use `PickedCards`).
 
 ## Tests
@@ -36,7 +40,7 @@ In Arena: Options > Account > enable **Detailed Logs (Plugin Support)**, then re
 
 When a match starts, the page switches to a library view: every card still in
 your library, its count and the chance to draw it next. Hovering a row shows
-the card image (Scryfall, or the chunk.science image for FRA cards). After the
+the card image from Scryfall. After the
 game ends it falls back to the draft view.
 
 How it works: the library is hidden in the log, so it is derived as your
@@ -72,6 +76,18 @@ Draft pick 1 of a simulated Quick Draft (`tools/simulate_draft.py`), then the ne
 In-game mode on a real match: library with draw chances, mana costs and types, plus the opponent instant-speed bar:
 
 ![Game mode](docs/game-mode.png)
+
+The WOE draft example shows the combined Card Game Base, Draftsim, and MTG Arena Zone grades on each card:
+
+![WOE draft sample with multi-source grades](docs/woe-draft-sample.png)
+
+Sealed mode with a sample six-pack, 90-card pool, and archetype fit summaries:
+
+![Sealed pool overview](docs/sealed-pool.png)
+
+Selecting **Show eligible cards** replaces the full pool with cards that fit the chosen archetype:
+
+![Sealed pool filtered to eligible Rakdos cards](docs/sealed-pool-eligible-cards.png)
 
 ### Try it without Arena
 

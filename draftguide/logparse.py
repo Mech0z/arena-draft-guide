@@ -1,6 +1,7 @@
 ﻿"""Incremental parser for the draft packs Arena writes to Player.log (read-only file access)."""
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,9 +29,16 @@ class PackObservation:
     source: str = "bot"
 
 
+@dataclass(frozen=True)
+class SealedObservation:
+    card_ids: tuple[int, ...]
+    event_name: str
+
+
 @dataclass
 class DraftLogState:
     pack: PackObservation | None = None
+    sealed_pool: SealedObservation | None = None
     version: int = 0
     offset: int = 0
     _seen: tuple = field(default=(), repr=False)
@@ -63,10 +71,78 @@ def parse_line(line: str) -> PackObservation | None:
     )
 
 
+def _nested_json(value, depth=0):
+    if depth > 8:
+        return
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            if isinstance(child, (dict, list)):
+                yield from _nested_json(child, depth + 1)
+            elif isinstance(child, str) and child.lstrip().startswith(("{", "[")):
+                try:
+                    yield from _nested_json(json.loads(child), depth + 1)
+                except (ValueError, RecursionError):
+                    pass
+    elif isinstance(value, list):
+        for child in value:
+            yield from _nested_json(child, depth + 1)
+
+
+def _pool_ids(value) -> tuple[int, ...]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            value = value.split(",")
+    if not isinstance(value, list):
+        return ()
+    ids = []
+    for item in value:
+        if isinstance(item, dict):
+            item = next((item[key] for key in ("GrpId", "grpId", "CardId", "cardId") if key in item), None)
+        try:
+            card_id = int(item)
+        except (TypeError, ValueError):
+            continue
+        if card_id > 0:
+            ids.append(card_id)
+    return tuple(ids)
+
+
+def parse_sealed_pool_line(line: str) -> SealedObservation | None:
+    """Find a complete Sealed CardPool in a direct or nested Arena log payload."""
+    if "CardPool" not in line and "cardPool" not in line:
+        return None
+    start = line.find("{")
+    if start < 0:
+        return None
+    try:
+        payload, _ = json.JSONDecoder().raw_decode(line[start:])
+    except ValueError:
+        return None
+    for value in _nested_json(payload):
+        event_name = value.get("InternalEventName") or value.get("internalEventName") or value.get("EventName") or value.get("eventName")
+        pool = value.get("CardPool", value.get("cardPool"))
+        if not isinstance(event_name, str) or "sealed" not in event_name.casefold():
+            continue
+        card_ids = _pool_ids(pool)
+        if len(card_ids) >= 40:
+            return SealedObservation(card_ids, event_name)
+    return None
+
+
 def apply_lines(state: DraftLogState, lines) -> bool:
     changed = False
     for line in lines:
         if state.game.feed_line(line):
+            changed = True
+        sealed = parse_sealed_pool_line(line)
+        if sealed is not None and sealed != state.sealed_pool:
+            state.sealed_pool = sealed
+            state.pack = None
+            state._seen = ()
+            state.version += 1
             changed = True
         obs = parse_line(line)
         if obs is None:
@@ -75,6 +151,8 @@ def apply_lines(state: DraftLogState, lines) -> bool:
         if key == state._seen:
             continue
         state._seen = key
+        if state.sealed_pool is not None:
+            state.sealed_pool = None
         state.pack = obs if obs.card_ids else None
         state.version += 1
         changed = True
@@ -90,6 +168,7 @@ def poll(state: DraftLogState, log_path: Path) -> bool:
     if size < state.offset:
         state.offset = 0
         state.pack = None
+        state.sealed_pool = None
         state._seen = ()
         state.game = GameTracker()
         state.version += 1
@@ -103,4 +182,3 @@ def poll(state: DraftLogState, log_path: Path) -> bool:
         return False
     state.offset += end + 1
     return apply_lines(state, chunk[: end + 1].decode("utf-8", errors="replace").splitlines())
-
