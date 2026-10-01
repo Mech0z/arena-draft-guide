@@ -114,6 +114,13 @@ class MultiSetTests(unittest.TestCase):
         (d / "cardgamebase-WOE.json").write_text(json.dumps({"cards": [], "set": {"code": "WOE"}}))
         self.assertEqual(ratings.Store(d).get("WOE", "QuickDraft")["set"]["code"], "WOE")
 
+    def test_store_uses_fra_multisource_cache(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "multi-source-FRA.json").write_text(json.dumps({
+            "cards": [], "set": {"code": "FRA"}, "source": "Multi-source ratings"
+        }))
+        self.assertEqual(ratings.Store(d).get("FRA")["source"], "Multi-source ratings")
+
 
 if __name__ == "__main__":
     unittest.main()

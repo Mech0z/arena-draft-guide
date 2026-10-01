@@ -51,6 +51,8 @@ def slim(raw: dict) -> dict:
                 "grade": rating.get("native"),
                 "score": rating["normalized"],
                 "comment": rating.get("comment"),
+                "scale": sources[key].get("scale"),
+                "sourceUrl": rating.get("sourceUrl") or sources[key].get("url"),
             })
         cons = card.get("consensus") or {}
         cards.append({
@@ -77,6 +79,16 @@ def slim(raw: dict) -> dict:
         "attribution": PAGE_URL,
         "cards": cards,
     }
+
+
+def slim_multisource(raw: dict) -> dict:
+    """Keep numeric source ratings and attribution, but not reviewer commentary."""
+    data = slim(raw)
+    data["source"] = "Multi-source ratings"
+    for card in data["cards"]:
+        card["ratings"] = [{key: value for key, value in rating.items() if key != "comment"} for rating in card["ratings"]]
+        card["notes"] = []
+    return data
 
 
 def load(cache: Path, refresh: bool = False) -> dict:
@@ -250,14 +262,41 @@ def fetch_cardgamebase(code: str) -> dict:
 
 
 class Store:
-    """Per-set ratings cache. FRA and WOE use Card Game Base; other sets use 17Lands."""
+    """Per-set ratings cache. FRA uses multi-source ratings; WOE uses Card Game Base."""
 
     def __init__(self, cache_dir: Path, refresh: bool = False):
         self.cache_dir = cache_dir
         self.refresh = refresh
 
+    def _write_cache(self, cache: Path, data: dict) -> dict:
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        return data
+
+    def _get_fra(self) -> dict:
+        cache = self.cache_dir / "multi-source-FRA.json"
+        if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:
+            return json.loads(cache.read_text(encoding="utf-8"))
+        try:
+            data = slim_multisource(fetch_raw())
+        except Exception as aggregate_error:
+            fallback_cache = self.cache_dir / "cardgamebase-FRA.json"
+            if fallback_cache.exists():
+                return json.loads(fallback_cache.read_text(encoding="utf-8"))
+            try:
+                fallback = fetch_cardgamebase("FRA")
+            except Exception as fallback_error:
+                raise RuntimeError(
+                    f"Could not fetch FRA multi-source ratings ({aggregate_error}) "
+                    f"or Card Game Base fallback ({fallback_error})"
+                ) from fallback_error
+            return self._write_cache(fallback_cache, fallback)
+        return self._write_cache(cache, data)
+
     def get(self, code: str, fmt: str = "PremierDraft") -> dict:
         code = code.upper()
+        if code == "FRA":
+            return self._get_fra()
         if code in CARDGAMEBASE_URLS:
             cache = self.cache_dir / f"cardgamebase-{code}.json"
             if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:
@@ -268,9 +307,7 @@ class Store:
                 if cache.exists():
                     return json.loads(cache.read_text(encoding="utf-8"))
                 raise
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-            cache.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-            return data
+            return self._write_cache(cache, data)
         cache = self.cache_dir / f"17l-{code}-{fmt}.json"
         if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:
             return json.loads(cache.read_text(encoding="utf-8"))
@@ -280,6 +317,4 @@ class Store:
             if cache.exists():
                 return json.loads(cache.read_text(encoding="utf-8"))
             raise
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        return data
+        return self._write_cache(cache, data)

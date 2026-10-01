@@ -19,7 +19,7 @@ RAW = {
     "set": {"code": "FRA"},
     "generatedAt": "t",
     "sourceOrder": ["a"],
-    "sources": {"a": {"short": "Src A"}},
+    "sources": {"a": {"short": "Src A", "url": "https://example.com/review", "scale": "A to F"}},
     "creatorNotes": {"sources": {"jd": {"name": "Jim"}}, "notes": [{"sourceKey": "jd", "cardId": "id1", "summary": "Good."}]},
     "cards": [
         {"id": "id1", "name": "Alpha", "collectorNumber": "1", "ratings": {"a": {"native": "A", "normalized": 95, "comment": "Great."}}, "consensus": {"score": 95, "overallRank": 1, "overallOf": 2}},
@@ -92,6 +92,17 @@ class GuideTests(unittest.TestCase):
         alpha = self.guide.snapshot()["cards"][0]
         self.assertEqual(alpha["ratings"][0]["comment"], "Great.")
         self.assertEqual(alpha["notes"], [{"source": "Jim", "text": "Good."}])
+
+    def test_multisource_ratings_keep_grades_but_not_commentary(self):
+        data = ratings.slim_multisource(RAW)
+        alpha = data["cards"][0]
+        self.assertEqual(data["source"], "Multi-source ratings")
+        self.assertEqual(alpha["score"], 95)
+        self.assertEqual(alpha["ratings"][0]["grade"], "A")
+        self.assertEqual(alpha["ratings"][0]["scale"], "A to F")
+        self.assertEqual(alpha["ratings"][0]["sourceUrl"], "https://example.com/review")
+        self.assertNotIn("comment", alpha["ratings"][0])
+        self.assertEqual(alpha["notes"], [])
 
     def test_new_pack_bumps_version(self):
         v = self.guide.snapshot()["version"]

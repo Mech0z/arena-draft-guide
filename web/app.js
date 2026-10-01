@@ -41,9 +41,19 @@ function renderCard(card, isBest) {
 
   const texts = el("div", "texts");
   for (const r of card.ratings || []) {
-    if (!r.comment) continue;
+    const numericScale = typeof r.scale === "string" ? r.scale.match(/^0(?:\.0)?\s*to\s*(\d+(?:\.0)?)$/) : null;
+    const detail = r.grade !== null && r.grade !== undefined
+      ? String(r.grade) + (numericScale ? `/${numericScale[1].replace(/\.0$/, "")}` : "")
+      : r.comment;
+    if (!detail) continue;
     const p = el("p", "");
-    p.append(el("b", "", r.source + ": "), document.createTextNode(r.comment));
+    const source = el(r.sourceUrl && r.sourceUrl.startsWith("https://") ? "a" : "b", "", r.source + ":");
+    if (source.tagName === "A") {
+      source.href = r.sourceUrl;
+      source.target = "_blank";
+      source.rel = "noreferrer";
+    }
+    p.append(source, document.createTextNode(" " + detail));
     texts.append(p);
   }
   for (const n of card.notes || []) {
