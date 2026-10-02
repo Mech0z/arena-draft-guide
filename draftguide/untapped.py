@@ -13,7 +13,7 @@ BASE = "https://mtga.untapped.gg/limited/draft/{slug}/{page}"
 USER_AGENT = "Mozilla/5.0 (compatible; arena-draft-guide/0.1)"
 SOURCE = "Untapped.gg"
 COLOR_LETTERS = {0: "C", 1: "W", 2: "U", 3: "B", 4: "R", 5: "G"}
-RARITY_COMMON = 2
+RARITY_NAMES = {2: "common", 3: "uncommon", 4: "rare", 5: "mythic"}
 MIN_OFFERS = 50
 TOP_N = 5
 
@@ -78,38 +78,42 @@ def parse_pick_order(page: str, code: str, url: str) -> dict:
             continue
         average = sum(value * offered.get(rank, 0) for rank, value in (entry.get("avg_pick_chosen") or {}).items()) / total
         colors = [COLOR_LETTERS[c] for c in (row[14] or []) if c in COLOR_LETTERS and c != 0]
-        picks.append({"name": name, "avgPick": round(average, 2), "colors": colors, "common": row[9] == RARITY_COMMON, "offered": total})
+        picks.append({"name": name, "avgPick": round(average, 2), "colors": colors, "rarity": RARITY_NAMES.get(row[9], "common"), "offered": total})
     if not picks:
         raise RuntimeError(f"No Untapped.gg pick-order data found for {code}")
 
     order = sorted(picks, key=lambda card: (card["avgPick"], card["name"].casefold()))
-    count = len(order)
+    by_rarity: dict[str, list[dict]] = defaultdict(list)
+    for card in order:
+        by_rarity[card["rarity"]].append(card)
     top_picks: dict[str, list[str]] = defaultdict(list)
-    for color in "WUBRG":
-        in_color = [card for card in order if card["colors"] == [color]]
-        for position, card in enumerate(in_color[:TOP_N], start=1):
-            top_picks[card["name"]].append(f"#{position} pick in {color}")
-        for position, card in enumerate([card for card in in_color if card["common"]][:TOP_N], start=1):
-            top_picks[card["name"]].append(f"#{position} common in {color}")
+    for rarity, group in by_rarity.items():
+        for color in "WUBRG":
+            in_color = [card for card in group if card["colors"] == [color]]
+            for position, card in enumerate(in_color[:TOP_N], start=1):
+                top_picks[card["name"]].append(f"#{position} {rarity} in {color}")
 
     cards = []
-    for index, card in enumerate(order):
-        score = round(100 * (count - 1 - index) / max(count - 1, 1))
-        cards.append({
-            "id": card["name"],
-            "pickOrder": {"avgPick": card["avgPick"], "rank": index + 1, "rankOf": count, "score": score},
-            "name": card["name"],
-            "score": score,
-            "avgPick": card["avgPick"],
-            "topPicks": top_picks.get(card["name"], []),
-            "ratings": [{
-                "source": SOURCE,
-                "grade": f"ATA {card['avgPick']:.1f}",
+    for rarity, group in by_rarity.items():
+        count = len(group)
+        for index, card in enumerate(group):
+            score = round(100 * (count - 1 - index) / max(count - 1, 1))
+            cards.append({
+                "id": card["name"],
+                "pickOrder": {"avgPick": card["avgPick"], "rank": index + 1, "rankOf": count, "rarity": rarity, "score": score},
+                "name": card["name"],
                 "score": score,
-                "scale": "avg pick",
-                "sourceUrl": url,
-            }],
-        })
+                "avgPick": card["avgPick"],
+                "topPicks": top_picks.get(card["name"], []),
+                "ratings": [{
+                    "source": SOURCE,
+                    "grade": f"ATA {card['avgPick']:.1f} (#{index + 1} {rarity})",
+                    "score": score,
+                    "scale": "avg pick",
+                    "sourceUrl": url,
+                }],
+            })
+
     return {
         "set": {"code": code},
         "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

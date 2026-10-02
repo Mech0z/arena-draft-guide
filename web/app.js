@@ -32,9 +32,9 @@ function renderCard(card, isBest) {
     if (card.score !== null) score.style.background = scoreColor(card.score);
     head.append(score);
     if (card.pickOrder) {
-      const pick = el("div", "score pick-score", "#" + card.pickOrder.rank);
+      const pick = el("div", "score pick-score", card.pickOrder.rarity[0].toUpperCase() + "#" + card.pickOrder.rank);
       pick.style.background = scoreColor(card.pickOrder.score);
-      pick.title = `Untapped.gg pick order: #${card.pickOrder.rank} of ${card.pickOrder.rankOf} (avg pick ${card.pickOrder.avgPick.toFixed(1)})`;
+      pick.title = `Untapped.gg pick order: #${card.pickOrder.rank} of ${card.pickOrder.rankOf} ${card.pickOrder.rarity}s (avg pick ${card.pickOrder.avgPick.toFixed(1)})`;
       head.append(pick);
     }
   }
