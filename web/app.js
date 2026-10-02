@@ -313,6 +313,12 @@ function renderPoolCard(card) {
   } else {
     header.append(el("span", "pool-score pool-unrated", "—"));
   }
+  if (card.pickOrder) {
+    const pick = el("span", "pool-score", card.pickOrder.rarity[0].toUpperCase() + "#" + card.pickOrder.rank);
+    pick.style.background = scoreColor(card.pickOrder.score);
+    pick.title = `Untapped.gg pick order: #${card.pickOrder.rank} of ${card.pickOrder.rankOf} ${card.pickOrder.rarity}s (avg pick ${card.pickOrder.avgPick.toFixed(1)})`;
+    header.append(pick);
+  }
   body.append(header);
   if (card.manaArena) body.append(manaEl(card.manaArena));
   if (card.typeLine) body.append(el("span", "pool-type", card.typeLine));
