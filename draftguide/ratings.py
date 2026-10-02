@@ -1,11 +1,15 @@
-"""Fetch and cache draft ratings from Card Game Base, chunk.science, and 17Lands."""
+﻿"""Fetch and cache draft ratings from Card Game Base, chunk.science, and 17Lands."""
 from __future__ import annotations
 
+import csv
 import json
 import re
 import time
+import unicodedata
+import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -522,6 +526,91 @@ def combine_woe_sources(sources: list[dict]) -> dict:
     }
 
 
+def _card_key(name: str) -> str:
+    name = name.split(" // ", 1)[0]
+    normalized = unicodedata.normalize("NFKD", name.replace("_", ""))
+    return re.sub(r"[^a-z0-9]", "", normalized.encode("ascii", "ignore").decode().lower())
+
+
+def apply_picklist_csv(data: dict, csv_path: Path) -> dict:
+    """Merge source-specific 0..scale ratings and optional comments from a per-set CSV."""
+    if not csv_path.exists():
+        return data
+
+    cards = {_card_key(card["name"]): card for card in data.get("cards", [])}
+    by_source: dict[str, dict[str, tuple[float, float, str, str]]] = {}
+    source_urls: dict[str, str] = {}
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as stream:
+        for row in csv.DictReader(stream):
+            source = (row.get("source") or "").strip()
+            name = (row.get("card_name") or "").strip()
+            if not source or not name:
+                continue
+            card_key = _card_key(name)
+            if card_key not in cards:
+                continue
+            try:
+                value = float(row["rating"])
+                scale = float(row["rating_scale"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if scale <= 0 or value < 0 or value > scale:
+                continue
+            by_source.setdefault(source, {})[card_key] = (
+                value,
+                scale,
+                (row.get("comment") or "").strip(),
+                (row.get("source_url") or "").strip(),
+            )
+            if row.get("source_url"):
+                source_urls[source] = row["source_url"].strip()
+
+    for card_key, card in cards.items():
+        ratings_by_source = {
+            (rating.get("source") or "").casefold(): rating
+            for rating in card.get("ratings", [])
+            if rating.get("source")
+        }
+        for source, source_ratings in by_source.items():
+            if card_key not in source_ratings:
+                continue
+            value, scale, comment, source_url = source_ratings[card_key]
+            score = value / scale * 100
+            ratings_by_source[source.casefold()] = {
+                "source": source,
+                "grade": f"{value:g}/{scale:g}",
+                "score": round(score),
+                "comment": comment,
+                "sourceUrl": source_url,
+            }
+        card["ratings"] = list(ratings_by_source.values())
+        expert_ratings = [
+            rating for rating in card["ratings"]
+            if "17lands" not in rating["source"].casefold() and rating.get("score") is not None
+        ]
+        if expert_ratings:
+            average_score = sum(rating["score"] for rating in expert_ratings) / len(expert_ratings)
+            card["averageRating"] = average_score / 20
+            card["ratingSourceCount"] = len(expert_ratings)
+            card["score"] = round(average_score)
+
+    if by_source:
+        data["supplementalSources"] = [
+            {"name": source, "url": source_urls.get(source, "")}
+            for source in by_source
+        ]
+        if not data.get("attribution") and source_urls:
+            data["attribution"] = next(iter(source_urls.values()))
+
+    rated_cards = [card for card in cards.values() if card.get("averageRating") is not None]
+    rated_cards.sort(key=lambda card: (-card["score"], card["name"].casefold()))
+    for rank, card in enumerate(rated_cards, start=1):
+        card["rank"], card["rankOf"] = rank, len(rated_cards)
+    return data
+
+
+
+
 class Store:
     """Per-set rating caches, combining independent grades where available."""
 
@@ -593,6 +682,27 @@ class Store:
         return self._write_cache(cache, data)
 
     def get(self, code: str, fmt: str = "PremierDraft") -> dict:
+        code = code.upper()
+        picklist_path = self.cache_dir / "picklists" / f"{code}.csv"
+        try:
+            data = self._get_public(code, fmt)
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, RuntimeError) as exc:
+            if not picklist_path.exists():
+                raise
+            warnings.warn(f"{code} public ratings unavailable; using local picklist CSV: {exc}", RuntimeWarning)
+            cards = {}
+            with picklist_path.open("r", encoding="utf-8-sig", newline="") as stream:
+                for row in csv.DictReader(stream):
+                    name = (row.get("card_name") or "").strip()
+                    if name:
+                        cards.setdefault(_card_key(name), {
+                            "name": name.replace("_", " "), "score": None,
+                            "rank": None, "rankOf": None, "ratings": [], "notes": [],
+                        })
+            data = {"set": {"code": code}, "cards": list(cards.values()), "attribution": ""}
+        return apply_picklist_csv(data, picklist_path)
+
+    def _get_public(self, code: str, fmt: str = "PremierDraft") -> dict:
         code = code.upper()
         if code == "FRA":
             return self._get_fra()

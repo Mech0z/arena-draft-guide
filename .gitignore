@@ -1,4 +1,9 @@
 data/
+!data/
+data/*
+!data/picklists/
+data/picklists/*
+!data/picklists/*.csv
 __pycache__/
 *.pyc
 .pytest_cache/

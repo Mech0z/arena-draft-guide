@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import threading
@@ -246,8 +247,12 @@ class Guide:
             ratings_data, _ = self._ratings_for(code, self.current_fmt) if not self.demo else (self.data, {})
             archetype_data, archetype_version = self._archetypes_for(code)
             sealed_data = self.sealed_view(archetype_data)
+            rating_revision = hashlib.sha256(json.dumps(
+                [(c.get("name"), c.get("score"), c.get("ratings", [])) for c in ratings_data.get("cards", [])],
+                ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")).hexdigest()[:12]
             return {
-                "version": f"{version}.{self.state.game.version}.{archetype_version}",
+                "version": f"{version}.{self.state.game.version}.{archetype_version}.{rating_revision}",
                 "set": code,
                 "archetypes": archetype_data,
                 "sealedPool": sealed_data,
