@@ -4,6 +4,8 @@ let lastVersion = null;
 let currentState = null;
 let activeView = "draft";
 let expandedSealedPair = null;
+let expandedSealedMode = null;
+let sealedArchetypeLimit = 5;
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -357,14 +359,41 @@ function renderSealedPool(pool) {
   const selectedArchetype = (pool.archetypes || []).find(
     (archetype) => sealedArchetypeKey(archetype) === expandedSealedPair,
   ) || null;
-  if (!selectedArchetype) expandedSealedPair = null;
+  if (!selectedArchetype) {
+    expandedSealedPair = null;
+    expandedSealedMode = null;
+  }
 
   const overview = el("section", "sealed-overview");
   overview.append(el("div", "sealed-legend",
     `Pool fit is heuristic: bomb ≥${pool.scoreThresholds.bomb}, strong ≥${pool.scoreThresholds.strong}, playable ≥${pool.scoreThresholds.playable}; archetype tiers come from the set guide.`));
   if (pool.archetypes && pool.archetypes.length) {
+    const controls = el("div", "sealed-analysis-controls");
+    const label = el("label", "", "Show best-supported");
+    const limit = el("select", "sealed-analysis-limit");
+    limit.setAttribute("aria-label", "Number of best-supported archetypes to show");
+    for (const [value, text] of [["5", "Top 5"], ["10", "Top 10"], ["0", "All"]]) {
+      const option = el("option", "", text);
+      option.value = value;
+      limit.append(option);
+    }
+    limit.value = String(sealedArchetypeLimit);
+    limit.addEventListener("change", () => {
+      sealedArchetypeLimit = Number(limit.value);
+      expandedSealedPair = null;
+      expandedSealedMode = null;
+      render(currentState);
+    });
+    label.append(" ", limit);
+    const shownCount = sealedArchetypeLimit ? Math.min(sealedArchetypeLimit, pool.archetypes.length) : pool.archetypes.length;
+    controls.append(label, el("span", "", `Showing ${shownCount} of ${pool.archetypes.length}`));
+    overview.append(controls);
+
     const analysis = el("div", "sealed-analysis-grid");
-    for (const archetype of pool.archetypes) {
+    const visibleArchetypes = sealedArchetypeLimit
+      ? pool.archetypes.slice(0, sealedArchetypeLimit)
+      : pool.archetypes;
+    for (const archetype of visibleArchetypes) {
       const card = el("article", "sealed-analysis");
       const selected = sealedArchetypeKey(archetype) === expandedSealedPair;
       if (selected) card.classList.add("selected");
@@ -372,23 +401,33 @@ function renderSealedPool(pool) {
       top.append(manaEl(archetype.colors.map((color) => "o" + color).join("")),
         el("strong", "", archetype.name),
         el("span", "archetype-tier " + archetypeTierClass(archetype.tier), archetype.tier ? "Tier " + archetype.tier : "No tier"));
-      const expand = el("button", "sealed-expand", selected ? "Show full pool" : "Show eligible cards");
-      expand.type = "button";
-      expand.setAttribute("aria-pressed", String(selected));
-      expand.addEventListener("click", () => {
-        expandedSealedPair = selected ? null : sealedArchetypeKey(archetype);
-        render(currentState);
-      });
       card.append(top, el("div", "sealed-potential potential-" + archetype.potentialRank, archetype.potential));
       const stats = el("div", "sealed-fit-stats");
       stats.append(el("span", "", `${archetype.bombs} bombs`),
         el("span", "", `${archetype.strong} strong`),
-        el("span", "", `${archetype.playables} playables`),
+        el("span", "", `${archetype.playables} playables (${archetype.playableCreatures} creatures, ${archetype.playableNoncreatures} non-creatures)`),
         el("span", "", `${archetype.eligibleCards} eligible`));
       if (archetype.top23Average !== null) {
         stats.append(el("span", "", `top-card avg ${archetype.top23Average}`));
       }
-      card.append(stats, expand);
+      const actions = el("div", "sealed-analysis-actions");
+      for (const [mode, text] of [["eligible", "Show eligible cards"], ["top", "Show top cards"]]) {
+        const button = el("button", "sealed-expand", text);
+        button.type = "button";
+        button.setAttribute("aria-pressed", String(selected && expandedSealedMode === mode));
+        button.addEventListener("click", () => {
+          if (selected && expandedSealedMode === mode) {
+            expandedSealedPair = null;
+            expandedSealedMode = null;
+          } else {
+            expandedSealedPair = sealedArchetypeKey(archetype);
+            expandedSealedMode = mode;
+          }
+          render(currentState);
+        });
+        actions.append(button);
+      }
+      card.append(stats, actions);
       analysis.append(card);
     }
     overview.append(analysis);
@@ -396,17 +435,20 @@ function renderSealedPool(pool) {
   cards.append(overview);
 
   const selectedCards = selectedArchetype
-    ? pool.cards.filter((card) => isEligiblePoolCard(card, selectedArchetype))
+    ? pool.cards.filter((card) =>
+      isEligiblePoolCard(card, selectedArchetype)
+        && (expandedSealedMode !== "top" || card.score >= pool.scoreThresholds.playable))
     : pool.cards;
   const poolHeading = el("div", "sealed-pool-heading");
   poolHeading.append(el("h2", "", selectedArchetype
-    ? `Eligible cards · ${selectedArchetype.name}`
+    ? `${expandedSealedMode === "top" ? "Top cards" : "Eligible cards"} · ${selectedArchetype.name} · ${selectedCards.reduce((sum, card) => sum + card.count, 0)} copies`
     : "Full sealed pool"));
   if (selectedArchetype) {
     const restore = el("button", "sealed-expand", "Show full pool");
     restore.type = "button";
     restore.addEventListener("click", () => {
       expandedSealedPair = null;
+      expandedSealedMode = null;
       render(currentState);
     });
     poolHeading.append(restore);
@@ -418,12 +460,19 @@ function renderSealedPool(pool) {
   const grouped = new Map(order.map((key) => [key, []]));
   for (const card of selectedCards) grouped.get(sealedColorGroup(card)).push(card);
   const sections = el("div", "sealed-color-sections");
+  if (selectedArchetype && !selectedCards.length) {
+    sections.append(el("div", "empty", "No playable-or-better rated cards are eligible for this archetype."));
+  }
   for (const key of order) {
     const group = grouped.get(key);
     if (!group.length) continue;
     group.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.name.localeCompare(b.name));
     const section = el("section", "sealed-color-group");
-    section.append(el("h2", "", `${labels[key]} · ${group.reduce((sum, card) => sum + card.count, 0)} cards`));
+    const cardCount = group.reduce((sum, card) => sum + card.count, 0);
+    const creatureCount = group
+      .filter((card) => (card.typeLine || "").toLowerCase().includes("creature"))
+      .reduce((sum, card) => sum + card.count, 0);
+    section.append(el("h2", "", `${labels[key]} · ${cardCount} cards (${creatureCount} creatures, ${cardCount - creatureCount} non-creatures)`));
     const list = el("div", "pool-cards");
     group.forEach((card) => list.append(renderPoolCard(card)));
     section.append(list);
@@ -468,7 +517,10 @@ function renderLibrary(state) {
 function render(state) {
   const previousState = currentState;
   currentState = state;
-  if (!state.sealedPool) expandedSealedPair = null;
+  if (!state.sealedPool) {
+    expandedSealedPair = null;
+    expandedSealedMode = null;
+  }
   if (state.sealedPool && !previousState?.sealedPool && !state.game && !state.pack) activeView = "sealed";
   if (!state.sealedPool && activeView === "sealed") activeView = state.game ? "library" : "draft";
   if (state.game && activeView === "draft") activeView = "library";

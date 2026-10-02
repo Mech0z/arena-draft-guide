@@ -208,7 +208,7 @@ class Guide:
             "uniqueCount": len(cards),
             "cards": cards,
             "archetypes": sealed.analyze_archetypes(cards, archetype_data),
-            "scoreThresholds": {"bomb": 90, "strong": 80, "playable": 65},
+            "scoreThresholds": sealed.SCORE_THRESHOLDS,
         }
 
     def instant_view(self, game) -> dict:
