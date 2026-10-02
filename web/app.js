@@ -31,6 +31,12 @@ function renderCard(card, isBest) {
     const score = el("div", "score", card.score === null ? "–" : (card.grade || Math.round(card.score)));
     if (card.score !== null) score.style.background = scoreColor(card.score);
     head.append(score);
+    if (card.pickOrder) {
+      const pick = el("div", "score pick-score", "#" + card.pickOrder.rank);
+      pick.style.background = scoreColor(card.pickOrder.score);
+      pick.title = `Untapped.gg pick order: #${card.pickOrder.rank} of ${card.pickOrder.rankOf} (avg pick ${card.pickOrder.avgPick.toFixed(1)})`;
+      head.append(pick);
+    }
   }
   const title = el("div", "title");
   title.append(el("div", "name", card.name));
@@ -39,6 +45,11 @@ function renderCard(card, isBest) {
   if (card.manaArena) title.querySelector(".sub").append(" ", manaEl(card.manaArena));
   head.append(title);
   body.append(head);
+  if ((card.topPicks || []).length) {
+    const badges = el("div", "badges");
+    for (const label of card.topPicks) badges.append(el("span", "badge", label));
+    body.append(badges);
+  }
 
   const texts = el("div", "texts");
   for (const r of card.ratings || []) {

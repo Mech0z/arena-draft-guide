@@ -1,4 +1,4 @@
-﻿import json, tempfile, time, unittest
+import json, tempfile, time, unittest
 from pathlib import Path
 from unittest.mock import patch
 from draftguide import ratings
@@ -20,6 +20,12 @@ NAMES = {1: "Alpha", 2: "Beta", 3: "Gamma", 4: "Delta"}
 
 
 class MultiSetTests(unittest.TestCase):
+    def setUp(self):
+        for name in ("untapped_pick_order", "untapped_tiers"):
+            patcher = patch.object(ratings.Store, name, return_value=None)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_parse_event(self):
         self.assertEqual(ratings.parse_event("PremierDraft_FDN_20241111"), ("PremierDraft", "FDN"))
         self.assertEqual(ratings.parse_event("QuickDraft_dsk_20240101"), ("QuickDraft", "DSK"))

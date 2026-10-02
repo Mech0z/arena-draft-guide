@@ -17,6 +17,8 @@ from . import archetypes, arena_db, instants, logparse, ratings, sealed
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 DEFAULT_LOG = Path(os.environ.get("USERPROFILE", "~")) / "AppData/LocalLow/Wizards Of The Coast/MTGA/Player.log"
+TIER_REFRESH = 7 * 24 * 3600
+TIER_RETRY = 600
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
 
 
@@ -27,13 +29,15 @@ def _norm(name: str) -> str:
 class Guide:
     def __init__(self, data: dict, names: dict[int, str], log_path: Path, demo: bool = False, lands: set[int] | None = None, details: dict | None = None,
                  instant_info: dict | None = None, land_colors: dict | None = None,
-                 expansions: dict | None = None, provider=None, archetype_dir: Path | None = None,
+                 expansions: dict | None = None, provider=None, archetype_dir: Path | None = None, tier_provider=None,
                  colors: dict[int, str] | None = None):
         self.expansions = expansions or {}
         self.colors = colors or {}
         self.provider = provider
+        self.tier_provider = tier_provider
+        self.archetype_revision = 0
         self.archetype_dir = archetype_dir or ROOT / "guides" / "archetypes"
-        self.archetype_cache: dict[str, tuple[int, dict | None]] = {}
+        self.archetype_cache: dict[str, tuple[int, dict | None, float, bool, int]] = {}
         self.indexes: dict[tuple[str, str], dict | None] = {}
         self.fail_until: dict[tuple[str, str], float] = {}
         self.current_set: str | None = None
@@ -113,9 +117,24 @@ class Guide:
         path = self.archetype_dir / f"{code}.json"
         modified = path.stat().st_mtime_ns if path.is_file() else 0
         cached = self.archetype_cache.get(code)
-        if cached is None or cached[0] != modified:
-            self.archetype_cache[code] = (modified, archetypes.load_set(self.archetype_dir, code))
-        return self.archetype_cache[code][1], modified
+        now = time.time()
+        stale = cached is not None and now - cached[2] > (TIER_REFRESH if cached[3] else TIER_RETRY)
+        if cached is None or cached[0] != modified or (self.tier_provider and stale):
+            live = None
+            if self.tier_provider and code:
+                try:
+                    live = self.tier_provider(code)
+                except Exception:
+                    live = None
+            guide = archetypes.load_set(self.archetype_dir, code)
+            if live and guide is None:
+                guide = archetypes.merge_tiers(None, live, code, ratings.KNOWN_SET_NAMES.get(code) or ratings.set_name(code))
+            elif live:
+                guide = archetypes.merge_tiers(guide, live, code)
+            self.archetype_revision += 1
+            cached = (modified, guide, now, bool(live) or not self.tier_provider, self.archetype_revision)
+            self.archetype_cache[code] = cached
+        return cached[1], modified + cached[4]
 
     def _image(self, grp: int) -> str:
         return self._image_for_name(self._name(grp))
@@ -327,7 +346,7 @@ def main(argv=None) -> int:
     land_colors = arena_db.load_land_colors(db) if db else {}
     expansions = arena_db.load_expansions(db) if db else {}
     guide = Guide(data, names, args.log, demo=args.demo, lands=lands, details=details,
-                  instant_info=instant_info, land_colors=land_colors, expansions=expansions, provider=store.get,
+                  instant_info=instant_info, land_colors=land_colors, expansions=expansions, provider=store.get, tier_provider=store.untapped_tiers,
                   colors=colors)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(guide))
     print(f"Draft guide on http://127.0.0.1:{args.port}  (log: {args.log})")

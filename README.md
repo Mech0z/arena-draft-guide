@@ -122,3 +122,6 @@ Selecting **Show eligible cards** replaces the full pool with cards that fit the
 py -3.12 tools/simulate_draft.py --log sim.log --interval 4
 py -3.12 -m draftguide --log sim.log --port 8780
 ```
+## Untapped.gg pick order and tier list
+
+For every set the server also tries Untapped.gg's pick-order page (cached in `data/untapped-pickorder-<SET>.json`) and limited tier-list page (`data/untapped-tiers-<SET>.json`). Each card gets a second leaf next to the aggregated score showing its Untapped pick-order rank, an `ATA` rating line, and badges such as "#2 pick in R" or "#1 common in G" for the top cards per colour. Pick order is not averaged into the score. The tier list (colour-pair/wedge tiers, 6+ win rate) is overlaid on the archetype guide, or builds a basic one when a set has no curated guide. Both refresh when the cache is over a week old; failures fall back to the cached copy and are retried every 10 minutes.

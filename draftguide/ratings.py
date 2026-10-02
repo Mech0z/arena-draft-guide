@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
+from . import untapped
+
 PAGE_URL = "https://chunk.science/mtga-reality-fracture.html"
 DATA_RE = re.compile(r'/mtga-reality-fracture/data/fra\.[0-9a-f]+\.js[^"\']*')
 USER_AGENT = "arena-draft-guide/0.1 (personal local use)"
@@ -109,6 +111,7 @@ LANDS17_URL = "https://www.17lands.com/card_ratings/data?expansion={code}&format
 LANDS17_PAGE = "https://www.17lands.com/card_ratings"
 MIN_GAMES = 200
 CACHE_TTL = 12 * 3600
+UNTAPPED_TTL = 7 * 24 * 3600
 CARDGAMEBASE_URLS = {
     "FRA": "https://cardgamebase.com/reality-fracture-draft-tier-list/",
     "WOE": "https://cardgamebase.com/wilds-of-eldraine-draft-tier-list/",
@@ -673,6 +676,30 @@ def review_urls(code: str, name: str = "") -> dict:
         "mtgazone": [f"https://mtgazone.com/{slug}-limited-set-review-{page}/" for page in MTGAZONE_COLOR_PAGES] if slug else [],
     }
 
+KNOWN_SET_NAMES = {"FRA": "Reality Fracture", "WOE": "Wilds of Eldraine"}
+
+
+def apply_untapped(data: dict, pick_order: dict) -> dict:
+    """Add the Untapped.gg pick-order rating and per-color top-pick badges; never changes the combined score."""
+    by_key = {_rating_name_key(card.get("name", "")): card for card in data.get("cards", [])}
+    matched = 0
+    for source_card in pick_order.get("cards", []):
+        card = by_key.get(_rating_name_key(source_card["name"]))
+        if card is None:
+            continue
+        matched += 1
+        card["ratings"] = [r for r in card.get("ratings", []) if r.get("source") != untapped.SOURCE]
+        card["ratings"].extend(source_card.get("ratings", []))
+        if source_card.get("pickOrder"):
+            card["pickOrder"] = dict(source_card["pickOrder"])
+        card["topPicks"] = list(source_card.get("topPicks") or [])
+    if matched:
+        sources = [s for s in data.get("supplementalSources", []) if s.get("name") != untapped.SOURCE]
+        sources.append({"name": untapped.SOURCE, "url": pick_order.get("attribution", "")})
+        data["supplementalSources"] = sources
+    return data
+
+
 class Store:
     """Per-set rating caches, combining independent grades where available."""
 
@@ -685,9 +712,9 @@ class Store:
         cache.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         return data
 
-    def _cached_source(self, cache_name: str, fetcher) -> dict:
+    def _cached_source(self, cache_name: str, fetcher, ttl: int = CACHE_TTL) -> dict:
         cache = self.cache_dir / cache_name
-        if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:
+        if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < ttl:
             return json.loads(cache.read_text(encoding="utf-8"))
         try:
             data = fetcher()
@@ -697,6 +724,31 @@ class Store:
                 return json.loads(cache.read_text(encoding="utf-8"))
             raise
         return self._write_cache(cache, data)
+
+    def _set_slugs(self, code: str) -> list[str]:
+        name = KNOWN_SET_NAMES.get(code) or set_name(code)
+        return untapped.slug_candidates(name) if name else []
+
+    def untapped_pick_order(self, code: str) -> dict | None:
+        slugs = self._set_slugs(code)
+        if not slugs:
+            return None
+        try:
+            return self._cached_source(f"untapped-pickorder-{code}.json", lambda: untapped.fetch_pick_order(code, slugs), UNTAPPED_TTL)
+        except Exception as exc:
+            print(f"Warning: Untapped.gg {code} pick order unavailable ({exc}).")
+            return None
+
+    def untapped_tiers(self, code: str) -> list[dict] | None:
+        slugs = self._set_slugs(code)
+        if not slugs:
+            return None
+        try:
+            data = self._cached_source(f"untapped-tiers-{code}.json", lambda: {"archetypes": untapped.fetch_tier_list(slugs)}, UNTAPPED_TTL)
+        except Exception as exc:
+            print(f"Warning: Untapped.gg {code} tier list unavailable ({exc}).")
+            return None
+        return data["archetypes"]
 
     def _get_multisource(self, code: str, fmt: str) -> dict:
         cache = self.cache_dir / f"multi-source-{code}-{fmt}.json"
@@ -768,7 +820,9 @@ class Store:
                             "rank": None, "rankOf": None, "ratings": [], "notes": [],
                         })
             data = {"set": {"code": code}, "cards": list(cards.values()), "attribution": ""}
-        return apply_picklist_csv(data, picklist_path)
+        data = apply_picklist_csv(data, picklist_path)
+        pick_order = self.untapped_pick_order(code)
+        return apply_untapped(data, pick_order) if pick_order else data
 
     def _get_public(self, code: str, fmt: str = "PremierDraft") -> dict:
         code = code.upper()
