@@ -1,6 +1,6 @@
-﻿# Arena draft guide (any draft set)
+# Arena draft guide (any draft set)
 
-A local, auto-refreshing web page for a second monitor. While you draft in MTG Arena it shows the cards in your current pack with card art and draft ratings. Reality Fracture and Wilds of Eldraine combine available grades from multiple Limited reviewers; other sets use 17Lands.
+A local, auto-refreshing web page for a second monitor. While you draft in MTG Arena it shows the cards in your current pack with card art and draft ratings. Reality Fracture combines grades from multiple Limited reviewers; every other set automatically tries Card Game Base, Draftsim, MTG Arena Zone and 17Lands (URLs are guessed from the set name via Scryfall, so sources without a page for the set are skipped).
 
 ## Run
 
@@ -24,7 +24,7 @@ In Arena: Options > Account > enable **Detailed Logs (Plugin Support)**, then re
 
 ## Limits
 
-- Works for any set: the set and format are read from the draft's event name (Premier/Quick/Traditional) and, in games, from the expansion codes in your deck. FRA combines available numeric grades from the multi-source feed and shows each original reviewer grade in `data/multi-source-FRA.json`. WOE combines Card Game Base, Draftsim, and MTG Arena Zone grades, averages those normalized reviewer scores, and shows each source's native scale; it also adds 17Lands' empirical grade when that endpoint has usable data. Combined data is cached by format in `data/multi-source-WOE-<format>.json`, with individual source caches alongside it. Other sets use 17Lands win-rate data (score = percentile of games-in-hand win rate among cards with 200+ games, cached in `data/17l-<SET>-<format>.json` for 12h). Cards without an available review grade appear unrated; cards without enough statistical data show "Not enough data" with art and mana cost. If a source is unreachable, cached ratings are used when available, otherwise its grades are omitted and the server logs a warning. 17Lands may have no current data for older sets or brand-new sets; only FRA packs have been seen live, and other sets are covered by unit tests and a simulated FDN draft (`python tools/simulate_draft.py --log X --set FDN`).
+- Works for any set: the set and format are read from the draft's event name (Premier/Quick/Traditional) and, in games, from the expansion codes in your deck. FRA combines available numeric grades from the multi-source feed and shows each original reviewer grade in `data/multi-source-FRA.json`. WOE combines Card Game Base, Draftsim, and MTG Arena Zone grades, averages those normalized reviewer scores, and shows each source's native scale; it also adds 17Lands' empirical grade when that endpoint has usable data. Combined data is cached by format in `data/multi-source-WOE-<format>.json`, with individual source caches alongside it. For any other set the reviewer pages above are discovered from the set name and combined the same way; if none exist, 17Lands win-rate data is used alone (score = percentile of games-in-hand win rate among cards with 200+ games, cached in `data/17l-<SET>-<format>.json` for 12h). Cards without an available review grade appear unrated; cards without enough statistical data show "Not enough data" with art and mana cost. If a source is unreachable, cached ratings are used when available, otherwise its grades are omitted and the server logs a warning. 17Lands may have no current data for older sets or brand-new sets; only FRA packs have been seen live, and other sets are covered by unit tests and a simulated FDN draft (`python tools/simulate_draft.py --log X --set FDN`).
 - Log parsing was replayed line-by-line against real public Arena logs (Quick and Premier drafts, the formats this tool targets, from andreagrandi/draftomen test fixtures): every pick produced a refreshed pack (14, 13, 12... cards) and Quick Draft's completion cleared the pack. It has not yet been run against your own live Reality Fracture draft; if the page shows Waiting for a draft pack..., check Detailed Logs is enabled.
 - Sealed-pool detection expects a logged sealed course response with an `InternalEventName` containing `Sealed` and at least 40 `CardPool` entries. This parser path has synthetic test coverage but has not yet been verified against a live Arena sealed log.
 - Ratings are aggregated opinions, not a pick for you; the page doesn't account for your colors so far (possible next step: use `PickedCards`).
@@ -65,6 +65,33 @@ Greyed cards are shown but not currently affordable. Hover for a larger image.
 Limits: the opponent's hand and deck are hidden, so "could have" is a pool
 guess, not knowledge. Mana from creatures, treasures or other non-land sources
 and X costs/cost reductions are not modelled; phyrexian mana is treated as free.
+
+## Supplemental picklist ratings
+
+The WOE and FRA Draftsim picklists are saved in `data/picklists/WOE.csv` and
+`data/picklists/FRA.csv` (324 WOE rows and 295 FRA rows). The FRA source uses
+`-1` for its five basic-land entries; those sentinel values are preserved in
+the CSV but excluded from scored card ratings. Neither source supplied
+card-specific comments, so those CSV cells are empty.
+
+The distinct source ratings are normalized to 0-100 internally and averaged;
+the card's leaf displays that mean on a 0-5 scale. 17Lands win-rate percentiles
+are not included in this average. Other sets without supplemental picklists
+continue using their configured rating provider. Each contributing source's
+grade and optional comment is shown on the card, with a link to that source.
+To add a source for an existing set, add rows to that set's CSV using:
+
+```csv
+source,card_name,rating,rating_scale,comment,source_url
+```
+
+Ratings are numeric and must be between zero and `rating_scale` (Draftsim
+uses a 0-5 scale). Leave `comment` empty when the source has no card-specific
+text; the card UI displays it when present. `source_url` preserves the
+attribution for each row. When public ratings are unavailable, a local
+picklist CSV is used as a fallback. The complete Draftsim pick-order page
+catalog found in its sitemap is listed in
+[`docs/DRAFTSIM_PICKLISTS.md`](docs/DRAFTSIM_PICKLISTS.md).
 
 ## Screenshots
 

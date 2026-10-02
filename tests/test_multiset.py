@@ -154,7 +154,37 @@ class MultiSetTests(unittest.TestCase):
     def test_store_uses_cache(self):
         d = Path(tempfile.mkdtemp())
         (d / "17l-FDN-PremierDraft.json").write_text(json.dumps({"cards": [], "set": {"code": "FDN"}}))
-        self.assertEqual(ratings.Store(d).get("FDN")["set"]["code"], "FDN")
+        with patch("draftguide.ratings.set_name", return_value="Foundations"), \
+                patch("draftguide.ratings.fetch_cardgamebase", side_effect=OSError("offline")), \
+                patch("draftguide.ratings.fetch_draftsim_woe", side_effect=OSError("offline")), \
+                patch("draftguide.ratings.fetch_mtgazone_woe", side_effect=OSError("offline")):
+            self.assertEqual(ratings.Store(d).get("FDN")["set"]["code"], "FDN")
+
+    def test_new_set_combines_reviewer_sources_discovered_from_set_name(self):
+        d = Path(tempfile.mkdtemp())
+        cgb = {"source": "Card Game Base", "attribution": "https://cardgamebase.com/the-hobbit-draft-tier-list/", "cards": [
+            {"name": "Sting", "score": 97, "ratings": [{"source": "Card Game Base", "grade": "A", "score": 97}]}]}
+        draftsim = {"source": "Draftsim", "cards": [
+            {"name": "Sting", "score": 80, "ratings": [{"source": "Draftsim", "grade": "8", "score": 80, "scale": "0 to 10"}]}]}
+        calls = []
+
+        def fetch_cgb(code, url):
+            calls.append(url)
+            if "the-hobbit" not in url:
+                raise OSError("404")
+            return cgb
+
+        with patch("draftguide.ratings.set_name", return_value="The Hobbit"), \
+                patch("draftguide.ratings.fetch_cardgamebase", side_effect=fetch_cgb), \
+                patch("draftguide.ratings.fetch_draftsim_woe", return_value=draftsim) as fetch_draftsim, \
+                patch("draftguide.ratings.fetch_mtgazone_woe", side_effect=OSError("offline")), \
+                patch("draftguide.ratings.fetch_17lands", side_effect=OSError("offline")):
+            data = ratings.Store(d).get("HOB", "QuickDraft")
+        self.assertEqual(calls, ["https://cardgamebase.com/the-hobbit-draft-tier-list/"])
+        self.assertEqual(fetch_draftsim.call_args.args[0], "https://draftsim.com/mtg-hob-limited-set-review/")
+        self.assertEqual(data["set"]["code"], "HOB")
+        self.assertEqual(data["cards"][0]["score"], 88)
+        self.assertEqual([r["source"] for r in data["cards"][0]["ratings"]], ["Card Game Base", "Draftsim"])
 
     def test_store_uses_woe_multisource_cache(self):
         d = Path(tempfile.mkdtemp())

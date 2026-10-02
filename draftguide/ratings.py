@@ -1,4 +1,4 @@
-﻿"""Fetch and cache draft ratings from Card Game Base, chunk.science, and 17Lands."""
+"""Fetch and cache draft ratings from Card Game Base, chunk.science, and 17Lands."""
 from __future__ import annotations
 
 import csv
@@ -231,7 +231,7 @@ class _TierTableParser(HTMLParser):
             self.table_depth -= 1
 
 
-def parse_cardgamebase(html: str, code: str) -> dict:
+def parse_cardgamebase(html: str, code: str, url: str | None = None) -> dict:
     parser = _TierTableParser()
     parser.feed(html)
     if not parser.cards:
@@ -264,7 +264,7 @@ def parse_cardgamebase(html: str, code: str) -> dict:
                 "grade": grade,
                 "score": score,
                 "scale": "A+ to F",
-                "sourceUrl": CARDGAMEBASE_URLS[code],
+                "sourceUrl": url or CARDGAMEBASE_URLS[code],
                 "comment": f"Draft grade {grade}",
             }],
             "notes": [],
@@ -272,15 +272,15 @@ def parse_cardgamebase(html: str, code: str) -> dict:
     return {
         "set": {"code": code},
         "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "attribution": CARDGAMEBASE_URLS[code],
+        "attribution": url or CARDGAMEBASE_URLS[code],
         "source": "Card Game Base",
         "cards": cards,
     }
 
 
-def fetch_cardgamebase(code: str) -> dict:
-    url = CARDGAMEBASE_URLS[code]
-    return parse_cardgamebase(_get(url).decode("utf-8"), code)
+def fetch_cardgamebase(code: str, url: str | None = None) -> dict:
+    url = url or CARDGAMEBASE_URLS[code]
+    return parse_cardgamebase(_get(url).decode("utf-8"), code, url)
 
 
 def _rating_name_key(name: str) -> str:
@@ -316,7 +316,7 @@ class _DraftsimRatingsParser(HTMLParser):
             self.in_heading = False
 
 
-def parse_draftsim_woe(html: str) -> dict:
+def parse_draftsim_woe(html: str, url: str = DRAFTSIM_WOE_URL, code: str = "WOE") -> dict:
     parser = _DraftsimRatingsParser()
     parser.feed(html)
     cards_by_key = {}
@@ -339,20 +339,20 @@ def parse_draftsim_woe(html: str) -> dict:
                 "grade": f"{grade:g}",
                 "score": round(grade * 10),
                 "scale": "0 to 10",
-                "sourceUrl": DRAFTSIM_WOE_URL,
+                "sourceUrl": url,
             }],
         })
     return {
-        "set": {"code": "WOE"},
+        "set": {"code": code},
         "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "attribution": DRAFTSIM_WOE_URL,
+        "attribution": url,
         "source": "Draftsim",
         "cards": cards,
     }
 
 
-def fetch_draftsim_woe() -> dict:
-    return parse_draftsim_woe(_get(DRAFTSIM_WOE_URL, BROWSER_USER_AGENT).decode("utf-8"),)
+def fetch_draftsim_woe(url: str = DRAFTSIM_WOE_URL, code: str = "WOE") -> dict:
+    return parse_draftsim_woe(_get(url, BROWSER_USER_AGENT).decode("utf-8"), url, code)
 
 
 class _MtgaZoneRatingsParser(HTMLParser):
@@ -411,28 +411,35 @@ def parse_mtgazone_woe_page(html: str, source_url: str) -> dict:
     return {"source": "MTG Arena Zone", "cards": cards}
 
 
-def fetch_mtgazone_woe() -> dict:
+def fetch_mtgazone_woe(urls: tuple[str, ...] = MTGAZONE_WOE_URLS, code: str = "WOE") -> dict:
     cards_by_key = {}
     used_urls = []
-    for url in MTGAZONE_WOE_URLS:
-        html = _get(url, BROWSER_USER_AGENT).decode("utf-8")
+    for url in urls:
+        try:
+            html = _get(url, BROWSER_USER_AGENT).decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404 and urls is not MTGAZONE_WOE_URLS:
+                continue
+            raise
         page = parse_mtgazone_woe_page(html, url)
         used_urls.append(url)
         for card in page["cards"]:
             cards_by_key.setdefault(_rating_name_key(card["name"]), card)
     if not cards_by_key:
-        raise RuntimeError("Could not find card grades in the MTG Arena Zone WOE reviews")
+        raise RuntimeError(f"Could not find card grades in the MTG Arena Zone {code} reviews")
     return {
-        "set": {"code": "WOE"},
+        "set": {"code": code},
         "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "attribution": MTGAZONE_WOE_URLS[0],
+        "attribution": used_urls[0],
         "sources": used_urls,
         "source": "MTG Arena Zone",
         "cards": list(cards_by_key.values()),
     }
 
 
-def combine_woe_sources(sources: list[dict]) -> dict:
+def combine_woe_sources(sources: list[dict], code: str = "WOE", name: str = "Wilds of Eldraine",
+                         urls: dict | None = None) -> dict:
+    urls = urls or {"cardgamebase": CARDGAMEBASE_URLS["WOE"], "draftsim": DRAFTSIM_WOE_URL, "mtgazone": list(MTGAZONE_WOE_URLS)}
     by_key = {}
     coverage = {}
     catalog_keys = {
@@ -482,7 +489,7 @@ def combine_woe_sources(sources: list[dict]) -> dict:
                 }
                 if clean["source"] == "Card Game Base":
                     clean.setdefault("scale", "A+ to F")
-                    clean.setdefault("sourceUrl", CARDGAMEBASE_URLS["WOE"])
+                    clean.setdefault("sourceUrl", urls["cardgamebase"])
                 elif clean["source"] == "17Lands":
                     clean.setdefault("scale", "GIH percentile")
                     clean.setdefault("sourceUrl", source_data.get("attribution"))
@@ -511,14 +518,14 @@ def combine_woe_sources(sources: list[dict]) -> dict:
         card["rankOf"] = len(ranked)
     cards.sort(key=lambda card: (card["score"] is None, -(card["score"] or 0), card["name"].casefold()))
     return {
-        "set": {"code": "WOE", "name": "Wilds of Eldraine"},
+        "set": {"code": code, "name": name},
         "generatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "attribution": CARDGAMEBASE_URLS["WOE"],
+        "attribution": urls["cardgamebase"],
         "source": "Multi-source ratings",
         "sources": [
-            *([{"name": "Card Game Base", "url": CARDGAMEBASE_URLS["WOE"]}] if coverage.get("Card Game Base") else []),
-            *([{"name": "Draftsim", "url": DRAFTSIM_WOE_URL}] if coverage.get("Draftsim") else []),
-            *([{"name": "MTG Arena Zone", "urls": list(MTGAZONE_WOE_URLS)}] if coverage.get("MTG Arena Zone") else []),
+            *([{"name": "Card Game Base", "url": urls["cardgamebase"]}] if coverage.get("Card Game Base") else []),
+            *([{"name": "Draftsim", "url": urls["draftsim"]}] if coverage.get("Draftsim") else []),
+            *([{"name": "MTG Arena Zone", "urls": list(urls["mtgazone"])}] if coverage.get("MTG Arena Zone") else []),
             *([{"name": "17Lands"}] if coverage.get("17Lands") else []),
         ],
         "sourceCoverage": coverage,
@@ -611,6 +618,61 @@ def apply_picklist_csv(data: dict, csv_path: Path) -> dict:
 
 
 
+SCRYFALL_SET_URL = "https://api.scryfall.com/sets/{code}"
+MTGAZONE_COLOR_PAGES = ("white", "blue", "black", "red", "green", "multicolor", "artifacts-lands-and-colorless")
+_SET_NAMES: dict[str, str] = {}
+
+
+def _slugify(name: str) -> str:
+    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii").lower()
+    name = name.replace("'", "")
+    return re.sub(r"[^a-z0-9]+", "-", name).strip("-")
+
+
+def set_name(code: str) -> str:
+    """Full set name from Scryfall (needed to build review-site URLs); empty when unknown."""
+    if code not in _SET_NAMES:
+        try:
+            req = urllib.request.Request(
+                SCRYFALL_SET_URL.format(code=urllib.parse.quote(code.lower())),
+                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                _SET_NAMES[code] = json.loads(resp.read().decode("utf-8")).get("name") or ""
+        except Exception:
+            return ""
+    return _SET_NAMES[code]
+
+
+def _fetch_first_cardgamebase(code: str, candidates: list[str]) -> dict:
+    last_error: Exception = RuntimeError(f"No Card Game Base page known for {code}")
+    for url in candidates:
+        try:
+            return fetch_cardgamebase(code, url)
+        except Exception as exc:
+            last_error = exc
+    raise last_error
+
+
+def review_urls(code: str, name: str = "") -> dict:
+    """Best-guess review pages for a set; unknown pages simply fail to load and are skipped."""
+    if code == "WOE":
+        return {"cardgamebase": CARDGAMEBASE_URLS["WOE"], "draftsim": DRAFTSIM_WOE_URL, "mtgazone": list(MTGAZONE_WOE_URLS)}
+    slug = _slugify(name) if name else ""
+    slugs = [slug] if slug else []
+    for part in (name.split(": ", 1)[::-1] if ": " in name else []):
+        if _slugify(part) not in slugs:
+            slugs.append(_slugify(part))
+    candidates = [CARDGAMEBASE_URLS[code]] if code in CARDGAMEBASE_URLS else [
+        f"https://cardgamebase.com/{item}-draft-tier-list/" for item in slugs
+    ]
+    return {
+        "cardgamebase": candidates[0] if candidates else None,
+        "cardgamebaseCandidates": candidates,
+        "draftsim": f"https://draftsim.com/mtg-{code.lower()}-limited-set-review/",
+        "mtgazone": [f"https://mtgazone.com/{slug}-limited-set-review-{page}/" for page in MTGAZONE_COLOR_PAGES] if slug else [],
+    }
+
 class Store:
     """Per-set rating caches, combining independent grades where available."""
 
@@ -636,31 +698,37 @@ class Store:
             raise
         return self._write_cache(cache, data)
 
-    def _get_woe(self, fmt: str) -> dict:
-        cache = self.cache_dir / f"multi-source-WOE-{fmt}.json"
+    def _get_multisource(self, code: str, fmt: str) -> dict:
+        cache = self.cache_dir / f"multi-source-{code}-{fmt}.json"
         if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:
             return json.loads(cache.read_text(encoding="utf-8"))
 
-        source_specs = [
-            ("Card Game Base", "cardgamebase-WOE.json", lambda: fetch_cardgamebase("WOE")),
-            ("Draftsim", "draftsim-WOE.json", fetch_draftsim_woe),
-            ("MTG Arena Zone", "mtgazone-WOE.json", fetch_mtgazone_woe),
-            ("17Lands", f"17l-WOE-{fmt}.json", lambda: fetch_17lands("WOE", fmt)),
-        ]
+        name = "Wilds of Eldraine" if code == "WOE" else set_name(code)
+        urls = review_urls(code, name)
+        source_specs = []
+        if urls["cardgamebase"]:
+            source_specs.append(("Card Game Base", f"cardgamebase-{code}.json", lambda: _fetch_first_cardgamebase(code, urls["cardgamebaseCandidates"])))
+        source_specs.append(("Draftsim", f"draftsim-{code}.json", lambda: fetch_draftsim_woe(urls["draftsim"], code)))
+        if urls["mtgazone"]:
+            source_specs.append(("MTG Arena Zone", f"mtgazone-{code}.json", lambda: fetch_mtgazone_woe(tuple(urls["mtgazone"]), code)))
+        source_specs.append(("17Lands", f"17l-{code}-{fmt}.json", lambda: fetch_17lands(code, fmt)))
         sources = []
-        for name, cache_name, fetcher in source_specs:
+        for source_name, cache_name, fetcher in source_specs:
             try:
                 data = self._cached_source(cache_name, fetcher)
             except Exception as exc:
-                print(f"Warning: {name} WOE ratings unavailable ({exc}).")
+                print(f"Warning: {source_name} {code} ratings unavailable ({exc}).")
                 continue
-            if name == "17Lands" and not any(card.get("ratings") for card in data.get("cards", [])):
-                print(f"Warning: 17Lands has no usable WOE ratings for {fmt}; keeping its image data only.")
+            if source_name == "17Lands" and not any(card.get("ratings") for card in data.get("cards", [])):
+                print(f"Warning: 17Lands has no usable {code} ratings for {fmt}; keeping its image data only.")
+            if source_name == "Card Game Base" and data.get("attribution"):
+                urls["cardgamebase"] = data["attribution"]
             sources.append(data)
         if not sources:
-            raise RuntimeError("No WOE card-rating sources are currently available")
-        return self._write_cache(cache, combine_woe_sources(sources))
-
+            raise RuntimeError(f"No {code} card-rating sources are currently available")
+        if code != "WOE" and all(source.get("source") not in ("Card Game Base", "Draftsim", "MTG Arena Zone") for source in sources):
+            return self._write_cache(cache, sources[0])
+        return self._write_cache(cache, combine_woe_sources(sources, code, name, urls))
     def _get_fra(self) -> dict:
         cache = self.cache_dir / "multi-source-FRA.json"
         if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:
@@ -707,7 +775,7 @@ class Store:
         if code == "FRA":
             return self._get_fra()
         if code == "WOE":
-            return self._get_woe(fmt)
+            return self._get_multisource(code, fmt)
         if code in CARDGAMEBASE_URLS:
             cache = self.cache_dir / f"cardgamebase-{code}.json"
             if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:
@@ -719,13 +787,4 @@ class Store:
                     return json.loads(cache.read_text(encoding="utf-8"))
                 raise
             return self._write_cache(cache, data)
-        cache = self.cache_dir / f"17l-{code}-{fmt}.json"
-        if cache.exists() and not self.refresh and time.time() - cache.stat().st_mtime < CACHE_TTL:
-            return json.loads(cache.read_text(encoding="utf-8"))
-        try:
-            data = fetch_17lands(code, fmt)
-        except Exception:
-            if cache.exists():
-                return json.loads(cache.read_text(encoding="utf-8"))
-            raise
-        return self._write_cache(cache, data)
+        return self._get_multisource(code, fmt)
