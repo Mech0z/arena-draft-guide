@@ -97,10 +97,10 @@ catalog found in its sitemap is listed in
 
 ## Screenshots
 
-Draft pick 1 of a simulated Quick Draft (`tools/simulate_draft.py`), then the next pick after a card is taken; the page refreshes by itself:
+The same demo pack with different rating sources selected from the header dropdown: Draftsim first, then Aggregated.
 
-![Draft pick 1](docs/draft-pick-1.png)
-![Draft pick 2](docs/draft-pick-2.png)
+![Draft view with Draftsim ratings selected](docs/draft-pick-1.png)
+![Draft view with Aggregated ratings selected](docs/draft-pick-2.png)
 
 In-game mode on a real match: library with draw chances, mana costs and types, plus the opponent instant-speed bar:
 
