@@ -6,6 +6,13 @@ let activeView = "draft";
 let expandedSealedPair = null;
 let expandedSealedMode = null;
 let sealedArchetypeLimit = 5;
+const AGGREGATE_RATING = "__aggregate__";
+let selectedRatingSource = AGGREGATE_RATING;
+let historySelection = null;
+let historyDetail = null;
+let historyLoading = false;
+let historyError = null;
+let replayIndex = 0;
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -20,7 +27,11 @@ function scoreColor(score) {
 }
 
 function renderCard(card, isBest) {
-  const root = el("article", "card" + (isBest ? " best" : "") + (card.unrated ? " unrated" : ""));
+  const root = el("article", "card"
+    + (isBest ? " best" : "")
+    + (card.unrated ? " unrated" : "")
+    + (card.takenByOthers ? " taken" : "")
+    + (card.chosen ? " chosen" : ""));
   if (card.image) {
     const img = el("img");
     img.src = card.image;
@@ -33,17 +44,21 @@ function renderCard(card, isBest) {
     const score = el("div", "score", card.score === null ? "–" : (card.grade || Math.round(card.score)));
     if (card.score !== null) score.style.background = scoreColor(card.score);
     head.append(score);
-    if (card.pickOrder) {
-      const pick = el("div", "score pick-score", card.pickOrder.rarity[0].toUpperCase() + "#" + card.pickOrder.rank);
-      pick.style.background = scoreColor(card.pickOrder.score);
-      pick.title = `Untapped.gg pick order: #${card.pickOrder.rank} of ${card.pickOrder.rankOf} ${card.pickOrder.rarity}s (avg pick ${card.pickOrder.avgPick.toFixed(1)})`;
-      head.append(pick);
-    }
+  }
+  if (card.pickOrder) {
+    const pick = el("div", "score pick-score", card.pickOrder.rarity[0].toUpperCase() + "#" + card.pickOrder.rank);
+    pick.style.background = scoreColor(card.pickOrder.score);
+    pick.title = `Untapped.gg pick order: #${card.pickOrder.rank} of ${card.pickOrder.rankOf} ${card.pickOrder.rarity}s (avg pick ${card.pickOrder.avgPick.toFixed(1)})`;
+    head.append(pick);
   }
   const title = el("div", "title");
   title.append(el("div", "name", card.name));
-  title.append(el("div", "sub", card.unrated ? "No rating found" :
-    (card.score === null ? "Not enough data" : `#${card.rank} of ${card.rankOf}`) + (card.rarity ? " \u00b7 " + card.rarity : "")));
+  const rankText = card.unrated
+    ? (card.unratedMessage || "No rating found")
+    : (card.score === null ? "Not enough data" : card.sourceRank
+      ? `#${card.rank} of ${card.rankOf} in pack`
+      : `#${card.rank} of ${card.rankOf}`);
+  title.append(el("div", "sub", rankText + (card.rarity ? " \u00b7 " + card.rarity : "")));
   if (card.manaArena) title.querySelector(".sub").append(" ", manaEl(card.manaArena));
   head.append(title);
   body.append(head);
@@ -122,7 +137,7 @@ function renderInstants(ins) {
   box.hidden = false;
   const head = el("div", "ihead");
   head.append(el("b", "", "Opponent instant-speed"),
-    document.createTextNode(` · ${ins.untapped} of ${ins.lands} lands untapped · colours ${ins.colours || "unknown"}`));
+    document.createTextNode(` · limited-set candidates · ${ins.untapped} of ${ins.lands} lands untapped · colours ${ins.colours || "unknown"}`));
   box.append(head);
   const row = el("div", "irow");
   const add = (list, label) => {
@@ -141,7 +156,7 @@ function renderInstants(ins) {
     }
   };
   add(ins.shown, "Seen from opponent");
-  add(ins.possible, "");
+  add(ins.possible, "Possible from limited set");
   if (!row.children.length) row.append(el("span", "ilabel", "Nothing castable with current untapped mana."));
   box.append(row);
 }
@@ -517,6 +532,7 @@ function renderLibrary(state) {
 function render(state) {
   const previousState = currentState;
   currentState = state;
+  updateRatingSourceControl(state);
   if (!state.sealedPool) {
     expandedSealedPair = null;
     expandedSealedMode = null;
@@ -532,25 +548,28 @@ function render(state) {
   const tiersTab = tabs.querySelector('[data-view="tiers"]');
   const sealedTab = tabs.querySelector('[data-view="sealed"]');
   const libraryTab = tabs.querySelector('[data-view="library"]');
+  const historyTab = tabs.querySelector('[data-view="history"]');
   const hasTiers = Boolean(state.archetypes && state.archetypes.archetypes.length);
   draftTab.hidden = Boolean(state.game);
   tiersTab.hidden = !hasTiers;
   sealedTab.hidden = !state.sealedPool;
   libraryTab.hidden = !state.game;
-  tabs.hidden = !state.sealedPool && (Boolean(state.game) || !hasTiers);
+  historyTab.hidden = false;
+  tabs.hidden = false;
   tabs.querySelectorAll("[role=tab]").forEach((tab) => {
     tab.setAttribute("aria-selected", String(tab.dataset.view === activeView));
   });
   if (!state.game) renderInstants(null);
   if (activeView === "sealed" && state.sealedPool) return renderSealedPool(state.sealedPool);
   if (activeView === "tiers" && state.archetypes) return renderColorTiers(state.archetypes);
+  if (activeView === "history") return renderHistory(state.history || { drafts: [], sealed: [] });
   if (state.game) return renderLibrary(state);
   document.getElementById("cards").className = "";
   const cards = document.getElementById("cards");
   cards.replaceChildren();
   const info = document.getElementById("pickinfo");
   const p = state.pack;
-  info.textContent = p ? [p.event, p.pack && `Pack ${p.pack}`, p.pick && `Pick ${p.pick}`, `${state.cards.length} cards`].filter(Boolean).join(" · ") : "";
+  info.textContent = p ? [p.event, p.pack && `Pack ${p.pack}`, p.pick && `Pick ${p.pick}`, `${state.cards.length} cards`, state.takenCards?.length && `${state.takenCards.length} taken by others`].filter(Boolean).join(" · ") : "";
   if (!state.cards.length) {
     cards.append(el("div", "empty", state.status.logFound
       ? state.sealedPool
@@ -559,8 +578,241 @@ function render(state) {
       : "Arena Player.log not found."));
     return;
   }
-  const bestScore = Math.max(...state.cards.map((c) => (c.unrated ? -1 : c.score ?? -1)));
-  state.cards.forEach((card) => cards.append(renderCard(card, !card.unrated && card.score === bestScore)));
+  const rankedPack = cardsForRatingSource([...(state.cards || []), ...(state.takenCards || [])]);
+  const displayCards = rankedPack.filter((card) => !card.takenByOthers);
+  const takenCards = rankedPack.filter((card) => card.takenByOthers);
+  const bestScore = Math.max(...displayCards.map((c) => (c.unrated ? -1 : c.score ?? -1)));
+  displayCards.forEach((card) => cards.append(renderCard(card, !card.unrated && card.score === bestScore)));
+  for (const card of takenCards) cards.append(renderCard(card, false));
+}
+
+function historyLabel(kind, item) {
+  return kind === "draft"
+    ? `Draft · ${item.event || "Unknown event"}`
+    : `Sealed · ${item.event || "Unknown event"} · ${item.card_count} cards`;
+}
+
+function historyDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function renderHistory(history) {
+  const main = document.getElementById("cards");
+  main.className = "history-view";
+  main.replaceChildren();
+  const list = el("aside", "history-list");
+  list.append(el("h2", "", "Saved runs"));
+  const items = [
+    ...history.drafts.map((item) => ({ kind: "draft", item, date: item.started_at })),
+    ...history.sealed.map((item) => ({ kind: "sealed", item, date: item.created_at })),
+  ].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  for (const entry of items) {
+    const button = el("button", "history-entry");
+    button.type = "button";
+    button.setAttribute("aria-selected", String(
+      historySelection?.kind === entry.kind && historySelection.id === entry.item.id,
+    ));
+    button.append(el("span", "", historyLabel(entry.kind, entry.item)));
+    button.append(el("span", "history-date",
+      `${historyDate(entry.date)}${entry.kind === "draft" ? ` · ${entry.item.observations} picks` : ""}`,
+    ));
+    button.addEventListener("click", () => loadHistoryEntry(entry.kind, entry.item.id));
+    list.append(button);
+  }
+  main.append(list);
+
+  const detail = el("section", "history-detail");
+  if (!historySelection) {
+    detail.append(el("div", "empty", items.length
+      ? "Choose a saved draft to replay or a sealed pool to inspect."
+      : "No saved drafts or sealed pools yet. New runs will be saved here automatically."));
+  } else if (historyLoading) {
+    detail.append(el("div", "empty", "Loading saved history…"));
+  } else if (historyError) {
+    detail.append(el("div", "empty", historyError));
+  } else if (!historyDetail) {
+    detail.append(el("div", "empty", "No saved history was returned."));
+  } else {
+    const back = el("button", "history-back", "Back to history");
+    back.type = "button";
+    back.addEventListener("click", () => {
+      historySelection = null;
+      historyDetail = null;
+      render(currentState);
+    });
+    detail.append(back);
+    if (historySelection.kind === "draft") renderDraftReplay(detail, historyDetail);
+    else renderSealedHistory(detail, historyDetail);
+  }
+  main.append(detail);
+}
+
+function renderDraftReplay(container, draft) {
+  const observations = draft.observations || [];
+  if (!observations.length) {
+    container.append(el("h2", "", `Draft replay · ${draft.event || "Unknown event"}`));
+    container.append(el("div", "empty", "No pack observations were saved for this draft."));
+    return;
+  }
+  const pickedCards = observations.flatMap((observation) => observation.chosenCards || []);
+  const colorGroups = [
+    ["W", "White"], ["U", "Blue"], ["B", "Black"], ["R", "Red"], ["G", "Green"],
+    ["Multicolor", "Multicolor"], ["Colorless", "Colorless"],
+  ];
+  const pickSummary = el("section", "history-draft-picks");
+  pickSummary.append(el("h2", "", `Your draft picks · ${pickedCards.length} cards`));
+  for (const [key, label] of colorGroups) {
+    const cardsInColor = pickedCards
+      .filter((card) => sealedColorGroup(card) === key)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    if (!cardsInColor.length) continue;
+    const group = el("section", "history-pick-color");
+    group.tabIndex = 0;
+    group.setAttribute("aria-label", `${label} draft picks; hover or focus to expand`);
+    group.append(el("h3", "", `${label} · ${cardsInColor.length} cards`));
+    const stack = el("div", "history-pick-stack");
+    for (const card of cardsInColor) stack.append(renderCard({ ...card, chosen: true }, false));
+    group.append(stack);
+    pickSummary.append(group);
+  }
+  if (!pickedCards.length) {
+    pickSummary.append(el("div", "empty", "No selected cards could be inferred from this draft log."));
+  }
+  container.append(pickSummary);
+  container.append(el("h2", "", `Draft replay · ${draft.event || "Unknown event"}`));
+  replayIndex = Math.max(0, Math.min(replayIndex, observations.length - 1));
+  const observation = observations[replayIndex];
+  const controls = el("div", "history-controls");
+  const previous = el("button", "", "Previous pick");
+  previous.type = "button";
+  previous.disabled = replayIndex === 0;
+  previous.addEventListener("click", () => {
+    replayIndex--;
+    render(currentState);
+  });
+  const next = el("button", "", "Next pick");
+  next.type = "button";
+  next.disabled = replayIndex >= observations.length - 1;
+  next.addEventListener("click", () => {
+    replayIndex++;
+    render(currentState);
+  });
+  const pack = observation.pack === null ? "?" : observation.pack + 1;
+  const pick = observation.pick === null ? "?" : observation.pick + 1;
+  controls.append(previous, el("b", "", `Pick ${replayIndex + 1} of ${observations.length} · Pack ${pack}, pick ${pick}`), next);
+  container.append(controls);
+  if ((observation.chosenCards || []).length) {
+    container.append(el("div", "history-picked",
+      `Your pick: ${observation.chosenCards.map((card) => card.name).join(", ")}`,
+    ));
+  }
+  const cards = el("div", "history-pack-cards");
+  for (const card of observation.cards || []) {
+    cards.append(renderCard({
+      ...card,
+      chosen: (observation.chosenIds || []).includes(card.arenaId),
+    }, false));
+  }
+  for (const card of observation.takenCards || []) {
+    cards.append(renderCard({ ...card, takenByOthers: true }, false));
+  }
+  container.append(cards);
+}
+
+function renderSealedHistory(container, sealed) {
+  container.append(
+    el("h2", "", `Sealed history · ${sealed.event || "Unknown event"}`),
+    el("p", "", `${sealed.cardCount} cards saved · ${historyDate(sealed.createdAt)}`),
+  );
+  const cards = el("div", "history-pack-cards");
+  for (const card of sealed.cards || []) cards.append(renderPoolCard(card));
+  container.append(cards);
+}
+
+async function loadHistoryEntry(kind, id) {
+  const selection = { kind, id };
+  historySelection = selection;
+  historyDetail = null;
+  historyLoading = true;
+  historyError = null;
+  replayIndex = 0;
+  render(currentState);
+  try {
+    const response = await fetch(`/api/history/${kind}/${encodeURIComponent(id)}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`History request failed (${response.status})`);
+    const detail = await response.json();
+    if (historySelection?.kind === kind && historySelection.id === id) historyDetail = detail;
+  } catch (error) {
+    if (historySelection?.kind === kind && historySelection.id === id) {
+      historyError = error.message || "Could not load saved history.";
+    }
+  } finally {
+    if (historySelection?.kind === selection.kind && historySelection.id === selection.id) {
+      historyLoading = false;
+      if (currentState) render(currentState);
+    }
+  }
+}
+
+function updateRatingSourceControl(state) {
+  const wrapper = document.getElementById("rating-source-control");
+  const select = document.getElementById("rating-source");
+  const sources = [...new Set((state.cards || []).flatMap((card) =>
+    (card.ratings || []).filter((rating) => typeof rating.score === "number").map((rating) => rating.source),
+  ))].sort((a, b) => a.localeCompare(b));
+  if (!sources.includes(selectedRatingSource)) selectedRatingSource = AGGREGATE_RATING;
+  wrapper.hidden = !state.pack || Boolean(state.game) || activeView !== "draft" || !sources.length;
+  select.replaceChildren();
+  for (const [value, text] of [[AGGREGATE_RATING, "Aggregated"], ...sources.map((source) => [source, source])]) {
+    const option = el("option", "", text);
+    option.value = value;
+    select.append(option);
+  }
+  select.value = selectedRatingSource;
+}
+
+function cardsForRatingSource(cards) {
+  if (selectedRatingSource === AGGREGATE_RATING) return cards;
+  const displayCards = cards.map((card) => {
+    const rating = (card.ratings || []).find((item) =>
+      item.source === selectedRatingSource && typeof item.score === "number",
+    );
+    if (!rating) {
+      return {
+        ...card,
+        score: null,
+        grade: null,
+        rank: null,
+        rankOf: null,
+        unrated: true,
+        unratedMessage: `No ${selectedRatingSource} rating`,
+        sourceRank: true,
+      };
+    }
+    return {
+      ...card,
+      score: rating.score,
+      grade: rating.grade,
+      rank: null,
+      rankOf: null,
+      unrated: false,
+      sourceRank: true,
+    };
+  });
+  const ranked = displayCards
+    .filter((card) => !card.unrated && card.score !== null)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  const ranks = new Map(ranked.map((card, index) => [card, index + 1]));
+  for (const card of displayCards) {
+    card.rank = ranks.get(card) || null;
+    card.rankOf = ranked.length;
+  }
+  return displayCards.sort((a, b) =>
+    Number(a.unrated) - Number(b.unrated)
+      || (b.score ?? -1) - (a.score ?? -1)
+      || a.name.localeCompare(b.name),
+  );
 }
 
 function renderStatus(state, error) {
@@ -602,6 +854,11 @@ setInterval(tick, POLL_MS);
 document.getElementById("archetypes-toggle").addEventListener("click", () => {
   const panel = document.getElementById("archetypes");
   setArchetypesOpen(panel.hidden);
+});
+
+document.getElementById("rating-source").addEventListener("change", (event) => {
+  selectedRatingSource = event.target.value;
+  if (currentState) render(currentState);
 });
 
 document.getElementById("draft-tabs").addEventListener("click", (event) => {

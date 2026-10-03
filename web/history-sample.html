@@ -3,8 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Draft Guide</title>
+<title>History sample</title>
 <link rel="stylesheet" href="style.css">
+<style>
+.history-sample-note { flex:none; padding:5px 12px; background:#242a37; color:#b4bac8; font-size:12px; }
+</style>
 </head>
 <body>
 <header>
@@ -17,16 +20,18 @@
   <div id="status"></div>
 </header>
 <nav id="draft-tabs" role="tablist" aria-label="Draft guide views" hidden>
-  <button type="button" role="tab" data-view="draft" aria-selected="true">Draft picks</button>
+  <button type="button" role="tab" data-view="draft" aria-selected="false">Draft picks</button>
   <button type="button" role="tab" data-view="tiers" aria-selected="false">Color tiers</button>
   <button type="button" role="tab" data-view="sealed" aria-selected="false" hidden>Sealed pool</button>
   <button type="button" role="tab" data-view="library" aria-selected="false" hidden>Library</button>
-  <button type="button" role="tab" data-view="history" aria-selected="false" hidden>History</button>
+  <button type="button" role="tab" data-view="history" aria-selected="true">History</button>
 </nav>
+<div class="history-sample-note">Fictional WOE sample · draft has 45 picks across 3 packs; sealed example shows selected cards from a 90-card pool.</div>
 <main id="cards"></main>
 <aside id="archetypes" hidden aria-label="Draft archetypes"></aside>
 <section id="instants" hidden></section>
-<footer>Ratings: <a id="attr" href="#" target="_blank" rel="noreferrer">Multi-source ratings</a> (FRA: multi-source; WOE: Card Game Base; other sets: 17Lands). Untapped.gg pick order and tier list. Auto-refreshes.</footer>
+<footer>Ratings: <a id="attr" href="#" target="_blank" rel="noreferrer">Sample ratings</a>. Illustrative history data; nothing is saved to your archive.</footer>
+<script src="history-sample.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

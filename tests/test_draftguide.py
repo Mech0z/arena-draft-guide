@@ -50,11 +50,14 @@ class ParseTests(unittest.TestCase):
         state = logparse.DraftLogState()
         logparse.apply_lines(state, [BOT_PLAIN, '{"DraftPack":[],"PackNumber":0,"PickNumber":1}'])
         self.assertIsNone(state.pack)
+        self.assertEqual(state.last_event_name, "QuickDraft_FRA")
 
     def test_duplicates_do_not_bump_version(self):
         state = logparse.DraftLogState()
-        logparse.apply_lines(state, [BOT_PLAIN, BOT_PLAIN])
+        saved = []
+        logparse.apply_lines(state, [BOT_PLAIN, BOT_PLAIN], on_pack=saved.append)
         self.assertEqual(state.version, 1)
+        self.assertEqual(len(saved), 1)
 
     def test_poll_incremental_partial_line_and_rotation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -69,6 +72,7 @@ class ParseTests(unittest.TestCase):
             log.write_text("x\n", encoding="utf-8")  # Arena restarted and rewrote the log
             logparse.poll(state, log)
             self.assertIsNone(state.pack)
+            self.assertIsNone(state.last_event_name)
 
     def test_nested_sealed_pool_preserves_duplicates(self):
         event = {
@@ -99,7 +103,12 @@ class GuideTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.log = Path(self.tmp.name) / "Player.log"
         self.log.write_text(BOT_ESCAPED + "\n", encoding="utf-8")
-        self.guide = Guide(ratings.slim(RAW), {101: "Beta // Gamma", 102: "Alpha"}, self.log)
+        self.guide = Guide(
+            ratings.slim(RAW),
+            {101: "Beta // Gamma", 102: "Alpha"},
+            self.log,
+            history_path=Path(self.tmp.name) / "history.sqlite3",
+        )
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -109,7 +118,35 @@ class GuideTests(unittest.TestCase):
         self.assertEqual([c["name"] for c in snap["cards"]], ["Alpha", "Beta // Gamma", "Unknown card (999)"])
         self.assertEqual((snap["pack"]["pack"], snap["pack"]["pick"]), (2, 5))
         self.assertTrue(snap["cards"][2]["unrated"])
+        self.assertEqual(snap["history"]["drafts"][0]["observations"], 1)
         json.dumps(snap)
+
+    def test_instant_guide_requires_limited_event_and_matching_deck_set(self):
+        game = self.guide.state.game
+        game.deck = [101, 102]
+        self.guide.expansions = {101: "FRA", 102: "FRA"}
+        self.assertIsNone(self.guide.instant_view(game))
+
+        self.guide.state.last_event_name = "PremierDraft_FRA_20260929"
+        self.assertIsNotNone(self.guide.instant_view(game))
+
+        self.guide.expansions = {101: "FDN", 102: "FDN"}
+        self.assertIsNone(self.guide.instant_view(game))
+
+    def test_history_details_enrich_draft_and_sealed_cards(self):
+        self.guide.history.record_pack(logparse.PackObservation(
+            (101, 102), 0, 0, "PremierDraft_FRA_20261003",
+        ))
+        draft_id = self.guide.history.list_history()["drafts"][0]["id"]
+        draft = self.guide.history_detail("draft", draft_id)
+        self.assertEqual([card["name"] for card in draft["observations"][0]["cards"]], ["Beta // Gamma", "Alpha"])
+
+        self.guide.history.record_sealed(logparse.SealedObservation(
+            (101, 101, 102), "Sealed_FRA_20261003",
+        ))
+        sealed_id = self.guide.history.list_history()["sealed"][0]["id"]
+        sealed = self.guide.history_detail("sealed", sealed_id)
+        self.assertEqual([(card["name"], card["count"]) for card in sealed["cards"]], [("Alpha", 1), ("Beta // Gamma", 2)])
 
     def test_demo_pack_uses_image_fallback_for_unillustrated_ratings(self):
         data = {
@@ -119,7 +156,7 @@ class GuideTests(unittest.TestCase):
                 for index in range(20)
             ],
         }
-        demo = Guide(data, {}, self.log, demo=True)
+        demo = Guide(data, {}, self.log, demo=True, history_path=Path(self.tmp.name) / "demo-history.sqlite3")
         snapshot = demo.snapshot()
         self.assertEqual(len(snapshot["cards"]), 15)
         self.assertTrue(all(card["image"].startswith("https://api.scryfall.com/cards/named?") for card in snapshot["cards"]))

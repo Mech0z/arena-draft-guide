@@ -58,7 +58,13 @@ class MultiSetTests(unittest.TestCase):
         self.assertEqual(by["Kindred Judgment"]["rank"], 2)
         self.assertEqual(data["source"], "Card Game Base")
         self.assertEqual(len(data["cards"]), 2)
-        guide = Guide(data, {8: "Minecart Daredevil"}, Path(tempfile.mkdtemp()) / "Player.log")
+        temp = Path(tempfile.mkdtemp())
+        guide = Guide(
+            data,
+            {8: "Minecart Daredevil"},
+            temp / "Player.log",
+            history_path=temp / "history.sqlite3",
+        )
         match = guide.lookup(8)
         self.assertEqual(match["grade"], "C+")
         self.assertFalse(match["unrated"])
@@ -124,7 +130,10 @@ class MultiSetTests(unittest.TestCase):
         log = Path(d) / "Player.log"
         log.write_text(json.dumps({"result": {"EventName": "QuickDraft_FDN_1", "PackNumber": 0, "PickNumber": 0,
                                               "DraftPack": ["1", "2", "4"], "PickedCards": []}}) + "\n")
-        return Guide(None, NAMES, log, provider=provider, details={1: ("o1oW", "Creature")})
+        return Guide(
+            None, NAMES, log, provider=provider, details={1: ("o1oW", "Creature")},
+            history_path=Path(d) / "history.sqlite3",
+        )
 
     def test_pack_uses_event_set_and_caches(self):
         calls = []
