@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .game import GameTracker
@@ -39,6 +39,7 @@ class SealedObservation:
 class DraftLogState:
     pack: PackObservation | None = None
     sealed_pool: SealedObservation | None = None
+    last_event_name: str | None = None
     version: int = 0
     offset: int = 0
     _seen: tuple = field(default=(), repr=False)
@@ -132,7 +133,7 @@ def parse_sealed_pool_line(line: str) -> SealedObservation | None:
     return None
 
 
-def apply_lines(state: DraftLogState, lines) -> bool:
+def apply_lines(state: DraftLogState, lines, on_pack=None, on_sealed=None) -> bool:
     changed = False
     for line in lines:
         if state.game.feed_line(line):
@@ -140,14 +141,19 @@ def apply_lines(state: DraftLogState, lines) -> bool:
         sealed = parse_sealed_pool_line(line)
         if sealed is not None and sealed != state.sealed_pool:
             state.sealed_pool = sealed
+            state.last_event_name = sealed.event_name
             state.pack = None
             state._seen = ()
             state.version += 1
             changed = True
+            if on_sealed:
+                on_sealed(sealed)
         obs = parse_line(line)
         if obs is None:
             continue
-        key = (obs.card_ids, obs.pack_number, obs.pick_number)
+        if obs.event_name:
+            state.last_event_name = obs.event_name
+        key = (obs.card_ids, obs.pack_number, obs.pick_number, obs.picked_ids, obs.event_name, obs.source)
         if key == state._seen:
             continue
         state._seen = key
@@ -156,10 +162,12 @@ def apply_lines(state: DraftLogState, lines) -> bool:
         state.pack = obs if obs.card_ids else None
         state.version += 1
         changed = True
+        if on_pack:
+            on_pack(obs if obs.event_name else replace(obs, event_name=state.last_event_name))
     return changed
 
 
-def poll(state: DraftLogState, log_path: Path) -> bool:
+def poll(state: DraftLogState, log_path: Path, on_pack=None, on_sealed=None, on_reset=None) -> bool:
     """Read newly appended log text; restart from the top when Arena rewrote the file."""
     try:
         size = log_path.stat().st_size
@@ -169,9 +177,12 @@ def poll(state: DraftLogState, log_path: Path) -> bool:
         state.offset = 0
         state.pack = None
         state.sealed_pool = None
+        state.last_event_name = None
         state._seen = ()
         state.game = GameTracker()
         state.version += 1
+        if on_reset:
+            on_reset()
     if size == state.offset:
         return False
     with log_path.open("rb") as handle:
@@ -181,4 +192,9 @@ def poll(state: DraftLogState, log_path: Path) -> bool:
     if end < 0:
         return False
     state.offset += end + 1
-    return apply_lines(state, chunk[: end + 1].decode("utf-8", errors="replace").splitlines())
+    return apply_lines(
+        state,
+        chunk[: end + 1].decode("utf-8", errors="replace").splitlines(),
+        on_pack=on_pack,
+        on_sealed=on_sealed,
+    )

@@ -5,14 +5,15 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
-from . import archetypes, arena_db, instants, logparse, ratings, sealed
+from . import archetypes, arena_db, history, instants, logparse, ratings, sealed
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -26,11 +27,17 @@ def _norm(name: str) -> str:
     return name.casefold().strip()
 
 
+_LIMITED_EVENT = re.compile(
+    r"^(?:PremierDraft|QuickDraft|TradDraft|Traditional_Draft|PickTwoDraft|Sealed|TradSealed)_(?P<set>[A-Za-z0-9]{2,6})(?:_|$)",
+    re.IGNORECASE,
+)
+
+
 class Guide:
     def __init__(self, data: dict, names: dict[int, str], log_path: Path, demo: bool = False, lands: set[int] | None = None, details: dict | None = None,
                  instant_info: dict | None = None, land_colors: dict | None = None,
                  expansions: dict | None = None, provider=None, archetype_dir: Path | None = None, tier_provider=None,
-                 colors: dict[int, str] | None = None):
+                 colors: dict[int, str] | None = None, history_path: Path | None = None):
         self.expansions = expansions or {}
         self.colors = colors or {}
         self.provider = provider
@@ -47,6 +54,7 @@ class Guide:
         self.instant_info = instant_info or {}
         self.land_colors = land_colors or {}
         self.data = data or {"cards": []}
+        self.history = history.HistoryStore(history_path)
         self.names = names
         self.lands = lands or set()
         self.log_path = log_path
@@ -99,10 +107,13 @@ class Guide:
         return max(counts, key=counts.get) if counts else None
 
     def lookup(self, card_id: int) -> dict:
+        return self.lookup_from_index(card_id, self.by_name)
+
+    def lookup_from_index(self, card_id: int, by_name: dict[str, dict]) -> dict:
         name = self.names.get(card_id)
         if name is None:
             return {"arenaId": card_id, "name": f"Unknown card ({card_id})", "unrated": True}
-        card = self.by_name.get(_norm(name)) or self.by_name.get(_norm(name.split(" // ")[0]))
+        card = by_name.get(_norm(name)) or by_name.get(_norm(name.split(" // ")[0]))
         if card is None:
             return {"arenaId": card_id, "name": name, "unrated": True}
         if not card.get("image"):
@@ -211,9 +222,19 @@ class Guide:
             "scoreThresholds": sealed.SCORE_THRESHOLDS,
         }
 
-    def instant_view(self, game) -> dict:
+    def instant_view(self, game) -> dict | None:
+        observation = self.state.sealed_pool or self.state.pack
+        event_name = observation.event_name if observation else self.state.last_event_name
+        match = _LIMITED_EVENT.match(event_name or "")
+        if not match or not game.deck:
+            return None
+        pool_set = match.group("set").upper()
+        nonlands = [grp for grp in game.deck if grp not in self.lands]
+        matching_cards = sum(self.expansions.get(grp) == pool_set for grp in nonlands)
+        if not nonlands or matching_cards * 2 < len(nonlands):
+            return None
         view = instants.guide(game.opponent_lands(), game.opponent_seen_grp_ids(), self.instant_info, self.land_colors,
-                              pool_set=self.current_set or self.default_set or "FRA")
+                              pool_set=pool_set)
         for key in ("shown", "possible"):
             view[key] = [
                 {"name": c["name"], "mana": c["mana"], "kind": c["kind"], "castable": c["castable"], "image": self._image(c["grp"])}
@@ -221,11 +242,70 @@ class Guide:
             ]
         return view
 
+    def history_detail(self, kind: str, item_id: str) -> dict | None:
+        if kind == "draft":
+            detail = self.history.get_draft(item_id)
+            if not detail:
+                return None
+            parsed = ratings.parse_event(detail["event"])
+            fmt, code = parsed if parsed else (self.current_fmt, self.current_set)
+            _, by_name = self._ratings_for(code, fmt)
+            detail["observations"] = [
+                observation for observation in detail["observations"] if observation["cardIds"]
+            ]
+            for observation in detail["observations"]:
+                observation["cards"] = [
+                    self._historical_card(card_id, by_name)
+                    for card_id in observation["cardIds"]
+                ]
+                observation["takenCards"] = [
+                    self._historical_card(card_id, by_name)
+                    for card_id in observation["takenIds"]
+                ]
+                observation["chosenCards"] = [
+                    self._historical_card(card_id, by_name)
+                    for card_id in observation["chosenIds"]
+                ]
+            return detail
+        if kind == "sealed":
+            detail = self.history.get_sealed(item_id)
+            if not detail:
+                return None
+            parsed = ratings.parse_event(detail["event"])
+            fmt, code = parsed if parsed else (self.current_fmt, self.current_set)
+            _, by_name = self._ratings_for(code, fmt)
+            counts = Counter(detail.pop("cardIds"))
+            detail["cards"] = []
+            for card_id, count in counts.items():
+                card = self._historical_card(card_id, by_name)
+                card["count"] = count
+                detail["cards"].append(card)
+            detail["cards"].sort(key=lambda card: (card.get("unrated", False), -(card.get("score") or 0), card["name"]))
+            return detail
+        return None
+
+    def _historical_card(self, card_id: int, by_name: dict[str, dict]) -> dict:
+        card = self.lookup_from_index(card_id, by_name)
+        if card_id in self.details:
+            card["manaArena"], card["typeLine"] = self.details[card_id]
+        if card_id in self.colors:
+            card["colors"] = list(self.colors[card_id])
+        elif isinstance(card.get("colors"), str):
+            card["colors"] = list(card["colors"])
+        card["isLand"] = "land" in card.get("typeLine", "").casefold()
+        return card
+
     def refresh(self) -> None:
         if self.demo:
             return
         with self.lock:
-            if logparse.poll(self.state, self.log_path):
+            if logparse.poll(
+                self.state,
+                self.log_path,
+                on_pack=self.history.record_pack,
+                on_sealed=self.history.record_sealed,
+                on_reset=self.history.reset_log_context,
+            ):
                 self.updated_at = time.time()
 
     def snapshot(self) -> dict:
@@ -266,18 +346,27 @@ class Guide:
             ratings_data, _ = self._ratings_for(code, self.current_fmt) if not self.demo else (self.data, {})
             archetype_data, archetype_version = self._archetypes_for(code)
             sealed_data = self.sealed_view(archetype_data)
+            history_data = self.history.list_history()
+            taken_cards = [
+                self.lookup(card_id)
+                for card_id in self.history.current_taken_ids(obs)
+            ] if not self.demo and obs else []
+            for card in taken_cards:
+                card["takenByOthers"] = True
             rating_revision = hashlib.sha256(json.dumps(
                 [(c.get("name"), c.get("score"), c.get("ratings", [])) for c in ratings_data.get("cards", [])],
                 ensure_ascii=False, sort_keys=True, separators=(",", ":"),
             ).encode("utf-8")).hexdigest()[:12]
             return {
-                "version": f"{version}.{self.state.game.version}.{archetype_version}.{rating_revision}",
+                "version": f"{version}.{self.state.game.version}.{archetype_version}.{rating_revision}.{history_data['revision']}",
                 "set": code,
                 "archetypes": archetype_data,
                 "sealedPool": sealed_data,
                 "game": self.game_view(),
                 "pack": pack,
                 "cards": cards,
+                "takenCards": taken_cards,
+                "history": history_data,
                 "status": {
                     "logFound": self.demo or self.log_path.exists(),
                     "cardDb": bool(self.names) or self.demo,
@@ -310,6 +399,16 @@ def make_handler(guide: Guide):
             path = urlparse(self.path).path
             if path == "/api/state":
                 return self._send(200, json.dumps(guide.snapshot()).encode(), "application/json")
+            if path == "/api/history":
+                return self._send(200, json.dumps(guide.history.list_history()).encode(), "application/json")
+            if path.startswith("/api/history/"):
+                parts = [unquote(part) for part in path.split("/") if part]
+                if len(parts) == 4 and parts[2] in ("draft", "sealed"):
+                    with guide.lock:
+                        detail = guide.history_detail(parts[2], parts[3])
+                    if detail is None:
+                        return self._send(404, b"not found", "text/plain")
+                    return self._send(200, json.dumps(detail).encode(), "application/json")
             name = "index.html" if path in ("", "/") else path.lstrip("/")
             target = (WEB / name).resolve()
             if WEB.resolve() not in target.parents or not target.is_file():

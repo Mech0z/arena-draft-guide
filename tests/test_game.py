@@ -125,7 +125,10 @@ class GameViewTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.log = Path(self.tmp.name) / "Player.log"
-        self.guide = Guide(ratings.slim(RAW), NAMES, self.log, lands=LANDS)
+        self.guide = Guide(
+            ratings.slim(RAW), NAMES, self.log, lands=LANDS,
+            history_path=Path(self.tmp.name) / "history.sqlite3",
+        )
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -150,7 +153,11 @@ class GameViewTests(unittest.TestCase):
         self.assertEqual([c["name"] for c in view["cards"]][-1], "Forest")  # lands last
 
     def test_mana_and_type_line_included(self):
-        guide = Guide(ratings.slim(RAW), NAMES, self.log, lands=LANDS, details={2: ('o1oG', 'Creature \u2014 Bear')})
+        guide = Guide(
+            ratings.slim(RAW), NAMES, self.log, lands=LANDS,
+            details={2: ('o1oG', 'Creature \u2014 Bear')},
+            history_path=Path(self.tmp.name) / "details-history.sqlite3",
+        )
         self.write(gre(connect(DECK)))
         card = {c['name']: c for c in guide.snapshot()['game']['cards']}['Bear']
         self.assertEqual((card['mana'], card['typeLine']), ('o1oG', 'Creature \u2014 Bear'))
@@ -176,4 +183,3 @@ class GameViewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
