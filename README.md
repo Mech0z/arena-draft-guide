@@ -106,10 +106,6 @@ In-game mode on a real match: library with draw chances, mana costs and types, p
 
 ![Game mode](docs/game-mode.png)
 
-The WOE draft example shows the combined Card Game Base, Draftsim, and MTG Arena Zone grades on each card:
-
-![WOE draft sample with multi-source grades](docs/woe-draft-sample.png)
-
 Sealed mode with a sample six-pack, 90-card pool, and archetype fit summaries:
 
 ![Sealed pool overview](docs/sealed-pool.png)
