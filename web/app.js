@@ -543,20 +543,27 @@ function render(state) {
   if (!state.sealedPool && activeView === "sealed") activeView = state.game ? "library" : "draft";
   if (state.game && activeView === "draft") activeView = "library";
   if (!state.game && activeView === "library") activeView = state.sealedPool ? "sealed" : "draft";
+  if (
+    state.game && !previousState?.game && activeView === "history"
+    && historySelection?.kind === "draft"
+    && historySelection.id === autoOpenedCompletedDraftId
+  ) activeView = "library";
   if (state.completedDraftId && state.completedDraftId !== autoOpenedCompletedDraftId) {
     autoOpenedCompletedDraftId = state.completedDraftId;
-    activeView = "history";
-    historySelection = { kind: "draft", id: state.completedDraftId };
-    historyDetail = null;
-    historyLoading = true;
-    historyError = null;
-    replayIndex = 0;
-    selectedDeckPair = null;
-    setTimeout(() => {
-      if (currentState?.completedDraftId === state.completedDraftId) {
-        loadHistoryEntry("draft", state.completedDraftId);
-      }
-    }, 0);
+    if (!state.game) {
+      activeView = "history";
+      historySelection = { kind: "draft", id: state.completedDraftId };
+      historyDetail = null;
+      historyLoading = true;
+      historyError = null;
+      replayIndex = 0;
+      selectedDeckPair = null;
+      setTimeout(() => {
+        if (currentState?.completedDraftId === state.completedDraftId) {
+          loadHistoryEntry("draft", state.completedDraftId);
+        }
+      }, 0);
+    }
   }
   preview.hide();
   renderArchetypes(state.archetypes, Boolean(state.game));

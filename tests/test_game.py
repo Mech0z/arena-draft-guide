@@ -174,6 +174,13 @@ class GameViewTests(unittest.TestCase):
         self.write(gre(connect(DECK)), gre(state([], [], over=True)))
         self.assertIsNone(self.guide.snapshot()["game"])
 
+    def test_constructed_sized_deck_hides_limited_instant_guide(self):
+        self.guide.state.last_event_name = "PremierDraft_FRA_20260929"
+        self.guide.state.game.deck = [2] * 60
+        self.guide.expansions = {2: "FRA"}
+
+        self.assertIsNone(self.guide.instant_view(self.guide.state.game))
+
     def test_log_rewrite_resets_game(self):
         self.write(gre(connect(DECK)))
         self.assertIsNotNone(self.guide.snapshot()["game"])

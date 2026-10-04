@@ -228,6 +228,9 @@ class Guide:
         match = _LIMITED_EVENT.match(event_name or "")
         if not match or not game.deck:
             return None
+        # GRE gives us the deck list but not a reliable current match-format identifier.
+        if len(game.deck) >= 60:
+            return None
         pool_set = match.group("set").upper()
         nonlands = [grp for grp in game.deck if grp not in self.lands]
         matching_cards = sum(self.expansions.get(grp) == pool_set for grp in nonlands)

@@ -41,7 +41,8 @@ In Arena: Options > Account > enable **Detailed Logs (Plugin Support)**, then re
 
 ## Game mode: library and draw chances
 
-When a match starts, the page switches to a library view: every card still in
+When a match starts, the page switches back to the library view—even after the
+completed-draft History view opened automatically: every card still in
 your library, its count and the chance to draw it next. Hovering a row shows
 the card image from Scryfall. After the
 game ends it falls back to the draft view.
@@ -64,6 +65,10 @@ colour identity of non-basics), then lists (1) instants/flash cards they have
 already shown (battlefield, graveyard, exile, stack) and (2) instants/flash creatures from the detected set
 instant/flash cards in their colours that their untapped mana can pay for.
 Greyed cards are shown but not currently affordable. Hover for a larger image.
+
+The guide is hidden for decks of 60 or more cards. Arena does not provide a
+reliable current match-format identifier in the data this view uses, so a
+smaller constructed deck can still be ambiguous.
 
 Limits: the opponent's hand and deck are hidden, so "could have" is a pool
 guess, not knowledge. Mana from creatures, treasures or other non-land sources
