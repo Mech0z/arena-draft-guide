@@ -40,6 +40,8 @@ class DraftLogState:
     pack: PackObservation | None = None
     sealed_pool: SealedObservation | None = None
     last_event_name: str | None = None
+    observed_pack_numbers: set[int] = field(default_factory=set)
+    draft_completed: bool = False
     version: int = 0
     offset: int = 0
     _seen: tuple = field(default=(), repr=False)
@@ -143,6 +145,8 @@ def apply_lines(state: DraftLogState, lines, on_pack=None, on_sealed=None) -> bo
             state.sealed_pool = sealed
             state.last_event_name = sealed.event_name
             state.pack = None
+            state.observed_pack_numbers.clear()
+            state.draft_completed = False
             state._seen = ()
             state.version += 1
             changed = True
@@ -152,6 +156,9 @@ def apply_lines(state: DraftLogState, lines, on_pack=None, on_sealed=None) -> bo
         if obs is None:
             continue
         if obs.event_name:
+            if state.last_event_name and obs.event_name != state.last_event_name:
+                state.observed_pack_numbers.clear()
+                state.draft_completed = False
             state.last_event_name = obs.event_name
         key = (obs.card_ids, obs.pack_number, obs.pick_number, obs.picked_ids, obs.event_name, obs.source)
         if key == state._seen:
@@ -159,6 +166,15 @@ def apply_lines(state: DraftLogState, lines, on_pack=None, on_sealed=None) -> bo
         state._seen = key
         if state.sealed_pool is not None:
             state.sealed_pool = None
+        if obs.card_ids:
+            if state.draft_completed:
+                state.observed_pack_numbers.clear()
+                state.draft_completed = False
+            if obs.pack_number is not None:
+                state.observed_pack_numbers.add(obs.pack_number)
+        elif len(state.observed_pack_numbers) >= 3:
+            state.draft_completed = True
+            state.observed_pack_numbers.clear()
         state.pack = obs if obs.card_ids else None
         state.version += 1
         changed = True
@@ -178,6 +194,8 @@ def poll(state: DraftLogState, log_path: Path, on_pack=None, on_sealed=None, on_
         state.pack = None
         state.sealed_pool = None
         state.last_event_name = None
+        state.observed_pack_numbers.clear()
+        state.draft_completed = False
         state._seen = ()
         state.game = GameTracker()
         state.version += 1

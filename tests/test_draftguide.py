@@ -52,6 +52,34 @@ class ParseTests(unittest.TestCase):
         self.assertIsNone(state.pack)
         self.assertEqual(state.last_event_name, "QuickDraft_FRA")
 
+    def test_draft_completion_requires_final_clear_after_three_distinct_packs(self):
+        state = logparse.DraftLogState()
+        event = "PremierDraft_FRA_20260929"
+        for pack in range(3):
+            pack_line = json.dumps({
+                "DraftPack": [100 + pack],
+                "PackNumber": pack,
+                "PickNumber": 0,
+                "EventName": event,
+            })
+            empty_line = json.dumps({
+                "DraftPack": [],
+                "PackNumber": pack,
+                "PickNumber": 1,
+                "EventName": event,
+            })
+            logparse.apply_lines(state, [pack_line])
+            logparse.apply_lines(state, [empty_line])
+            self.assertEqual(state.draft_completed, pack == 2)
+
+        logparse.apply_lines(state, [json.dumps({
+            "DraftPack": [200],
+            "PackNumber": 0,
+            "PickNumber": 0,
+            "EventName": event,
+        })])
+        self.assertFalse(state.draft_completed)
+
     def test_duplicates_do_not_bump_version(self):
         state = logparse.DraftLogState()
         saved = []
@@ -121,6 +149,16 @@ class GuideTests(unittest.TestCase):
         self.assertEqual(snap["history"]["drafts"][0]["observations"], 1)
         json.dumps(snap)
 
+    def test_snapshot_identifies_the_completed_saved_draft(self):
+        self.guide.snapshot()
+        self.guide.state.draft_completed = True
+        self.guide.state.last_event_name = "PremierDraft_FRA_20260929"
+
+        snapshot = self.guide.snapshot()
+
+        self.assertTrue(snapshot["draftCompleted"])
+        self.assertEqual(snapshot["completedDraftId"], snapshot["history"]["drafts"][0]["id"])
+
     def test_instant_guide_requires_limited_event_and_matching_deck_set(self):
         game = self.guide.state.game
         game.deck = [101, 102]
@@ -137,9 +175,14 @@ class GuideTests(unittest.TestCase):
         self.guide.history.record_pack(logparse.PackObservation(
             (101, 102), 0, 0, "PremierDraft_FRA_20261003",
         ))
+        self.guide.history.record_pack(logparse.PackObservation(
+            (102,), 0, 1, "PremierDraft_FRA_20261003", (101,),
+        ))
         draft_id = self.guide.history.list_history()["drafts"][0]["id"]
         draft = self.guide.history_detail("draft", draft_id)
         self.assertEqual([card["name"] for card in draft["observations"][0]["cards"]], ["Beta // Gamma", "Alpha"])
+        self.assertEqual(draft["observations"][0]["chosenCards"][0]["name"], "Beta // Gamma")
+        self.assertEqual(len(draft["deckBuild"]["builds"][0]["cards"]), 1)
 
         self.guide.history.record_sealed(logparse.SealedObservation(
             (101, 101, 102), "Sealed_FRA_20261003",

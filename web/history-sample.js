@@ -3,6 +3,54 @@
 const sampleImage = (name) =>
   `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(name)}&format=image`;
 
+const sampleTypeLines = {
+  "Virtue of Loyalty": "Enchantment — Virtue",
+  "Imodane's Recruiter": "Creature — Human Knight",
+  "Virtue of Persistence": "Enchantment — Virtue",
+  "Torch the Tower": "Instant",
+  "Candy Grapple": "Instant",
+  "Hamlet Glutton": "Creature — Giant",
+  "Cut In": "Sorcery",
+  "Lord Skitter's Butcher": "Creature — Rat Peasant",
+  "Diminisher Witch": "Creature — Human Warlock",
+  "Brave the Wilds": "Sorcery",
+  "Threadbind Clique // Rip the Seams": "Creature — Faerie",
+  "Welcome to Sweettooth": "Enchantment",
+  "Redcap Thief": "Creature — Goblin Rogue",
+  "Gingerbread Hunter": "Creature — Giant",
+  "Eriette's Tempting Apple": "Artifact",
+  "Gruff Triplets": "Creature — Giant Warlock",
+  "Agatha of the Vile Cauldron": "Legendary Creature — Human Warlock",
+  "Agatha's Champion": "Creature — Human Knight",
+  "Agatha's Soul Cauldron": "Legendary Artifact",
+  "Aquatic Alchemist // Bubble Up": "Creature — Merfolk Wizard",
+  "Archive Dragon": "Creature — Dragon",
+  "Archon of the Wild Rose": "Creature — Archon",
+  "Archon's Glory": "Instant",
+  "Armory Mice": "Creature — Mouse Soldier",
+  "Ashiok's Reaper": "Creature — Human Warlock",
+  "Ashiok, Wicked Manipulator": "Legendary Planeswalker — Ashiok",
+  "Ash, Party Crasher": "Legendary Creature — Human Peasant",
+  "Asinine Antics": "Instant",
+  "A Tale for the Ages": "Enchantment",
+  "Back for Seconds": "Sorcery",
+  "Barrow Naughty": "Creature — Faerie Warlock",
+  "Beanstalk Wurm // Plant Beans": "Creature — Plant Wurm",
+  "Belligerent of the Ball": "Creature — Human Peasant",
+  "Bellowing Bruiser // Beat a Path": "Creature — Ogre",
+  "Beluna Grandsquall // Seek Thrills": "Legendary Creature — Giant Noble",
+  "Beluna's Gatekeeper": "Creature — Giant Soldier",
+  "Beseech the Mirror": "Sorcery",
+  "Besotted Knight // Betroth the Beast": "Creature — Human Knight",
+  "Bespoke Battlegarb": "Artifact — Equipment",
+  "Bestial Bloodline": "Enchantment — Aura",
+  "Bitter Chill": "Enchantment — Aura",
+  "Blossoming Tortoise": "Creature — Turtle",
+  "Boundary Lands Ranger": "Creature — Human Ranger",
+  "Bramble Familiar // Fetch Quest": "Creature — Elemental Raccoon",
+  "Break the Spell": "Instant",
+};
+
 const sampleCards = [
   ["Virtue of Loyalty", "4oWoW", ["W"], "Rare"],
   ["Imodane's Recruiter", "2oR", ["R"], "Rare"],
@@ -52,6 +100,7 @@ const sampleCards = [
 ].map(([name, manaArena, colors, rarity], index, all) => {
   const score = 38 + ((index * 37 + 13) % 58);
   const grade = (score / 20).toFixed(1);
+  const typeLine = sampleTypeLines[name] || "";
   return {
   arenaId: 901 + index,
   name,
@@ -61,6 +110,7 @@ const sampleCards = [
   rarity,
   colors,
   manaArena,
+  typeLine,
   rank: index + 1,
   rankOf: all.length,
   ratings: [{ source: "Draftsim", grade: Number((Number(grade) - 0.2).toFixed(1)), scale: "0 to 5" }],
@@ -83,6 +133,8 @@ const selectedDraftCards = seededShuffle(sampleCards, 20261003);
 const sampleState = {
   version: "history-sample-1",
   set: "WOE",
+  draftCompleted: true,
+  completedDraftId: "sample-draft",
   status: { demo: true, cardDb: true, logFound: true, updatedAt: null, source: "Sample data" },
   pack: null,
   cards: [],
@@ -148,6 +200,97 @@ const sampleDraft = {
       takenCards,
     };
   }),
+};
+
+const sampleColorNames = { W: "White", U: "Blue", B: "Black", R: "Red", G: "Green" };
+const sampleColorPairs = [
+  ["W", "U"], ["W", "B"], ["W", "R"], ["W", "G"], ["U", "B"],
+  ["U", "R"], ["U", "G"], ["B", "R"], ["B", "G"], ["R", "G"],
+];
+const sampleManaValue = (card) => (card.manaArena || "").split("o").reduce((total, symbol) => {
+  if (/^\d+$/.test(symbol)) return total + Number(symbol);
+  if (symbol.includes("/") && symbol.split("/").some((part) => /^\d+$/.test(part))) {
+    return total + Math.max(...symbol.split("/").filter((part) => /^\d+$/.test(part)).map(Number));
+  }
+  return total + (symbol && symbol.toUpperCase() !== "X" ? 1 : 0);
+}, 0);
+const sampleBuilds = sampleColorPairs.map((colors) => {
+  const eligible = selectedDraftCards.filter((card) =>
+    (card.colors || []).every((color) => colors.includes(color)),
+  );
+  const cards = [...eligible].sort((a, b) =>
+    (b.score ?? -1) - (a.score ?? -1)
+    || Number(b.typeLine.includes("Creature")) - Number(a.typeLine.includes("Creature"))
+    || sampleManaValue(a) - sampleManaValue(b)
+    || a.name.localeCompare(b.name),
+  ).slice(0, 23);
+  const selectedIds = new Set(cards.map((card) => card.arenaId));
+  const cuts = selectedDraftCards
+    .filter((card) => !selectedIds.has(card.arenaId))
+    .sort((a, b) =>
+      Number((a.colors || []).some((color) => !colors.includes(color)))
+        - Number((b.colors || []).some((color) => !colors.includes(color)))
+      || (a.score ?? 101) - (b.score ?? 101)
+      || a.name.localeCompare(b.name),
+    )
+    .slice(0, 8)
+    .map((card) => ({
+      ...card,
+      cutReason: (card.colors || []).some((color) => !colors.includes(color))
+        ? "Outside these colors"
+        : card.score < 60 ? "Low grade" : "Below the top 23",
+    }));
+  const manaValues = cards.map(sampleManaValue);
+  const creatures = cards.filter((card) => card.typeLine.includes("Creature")).length;
+  const early = manaValues.filter((value) => value <= 2).length;
+  const topEnd = manaValues.filter((value) => value >= 5).length;
+  const curveCounts = new Map();
+  for (const value of manaValues) curveCounts.set(value, (curveCounts.get(value) || 0) + 1);
+  const pips = {};
+  for (const card of cards) {
+    for (const symbol of card.manaArena.split("o")) {
+      for (const color of "WUBRG") {
+        if (symbol.includes(color)) pips[color] = (pips[color] || 0) + 1;
+      }
+    }
+  }
+  const name = colors.map((color) => sampleColorNames[color]).join("-");
+  const averageScore = cards.length
+    ? Math.round(cards.reduce((sum, card) => sum + card.score, 0) / cards.length * 10) / 10
+    : null;
+  return {
+    colors,
+    name,
+    tier: null,
+    eligibleCount: eligible.length,
+    averageScore,
+    cards,
+    cuts,
+    balance: {
+      checks: [
+        { label: "Spell count", value: `${cards.length}/23`, status: cards.length === 23 ? "good" : "warning", detail: "Limited decks usually play 23 nonland cards." },
+        { label: "Creatures", value: String(creatures), status: creatures >= 14 && creatures <= 17 ? "good" : "warning", detail: "A common target is 14–17 creatures." },
+        { label: "Early plays", value: String(early), status: early >= 6 ? "good" : "warning", detail: "Cards costing 1–2 mana; fewer than 6 may leave a slow start." },
+        { label: "Top end", value: String(topEnd), status: topEnd <= 5 ? "good" : "warning", detail: "Cards costing 5+ mana; too many can clog your hand." },
+      ],
+      curve: [...curveCounts].sort((a, b) => a[0] - b[0]).map(([manaValue, count]) => ({ manaValue, count })),
+      knownManaCosts: cards.length,
+      pips,
+    },
+    _rank: [
+      (averageScore || 0) * cards.length / 23 + cards.length * 0.15
+        + cards.filter((card) => card.colors.length).length * 0.05,
+      cards.length,
+      cards.filter((card) => card.colors.length).length,
+    ],
+  };
+});
+sampleBuilds.sort((a, b) =>
+  b._rank[0] - a._rank[0] || b._rank[1] - a._rank[1] || b._rank[2] - a._rank[2]
+  || a.name.localeCompare(b.name),
+);
+sampleDraft.deckBuild = {
+  builds: sampleBuilds.map(({ _rank, ...build }) => build),
 };
 
 const sampleSealed = {

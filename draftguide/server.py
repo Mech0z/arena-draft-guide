@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
-from . import archetypes, arena_db, history, instants, logparse, ratings, sealed
+from . import archetypes, arena_db, deckbuild, history, instants, logparse, ratings, sealed
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -266,6 +266,15 @@ class Guide:
                     self._historical_card(card_id, by_name)
                     for card_id in observation["chosenIds"]
                 ]
+            guide, _ = self._archetypes_for(code)
+            detail["deckBuild"] = deckbuild.analyze_pool(
+                [
+                    card
+                    for observation in detail["observations"]
+                    for card in observation["chosenCards"]
+                ],
+                guide,
+            )
             return detail
         if kind == "sealed":
             detail = self.history.get_sealed(item_id)
@@ -347,6 +356,13 @@ class Guide:
             archetype_data, archetype_version = self._archetypes_for(code)
             sealed_data = self.sealed_view(archetype_data)
             history_data = self.history.list_history()
+            completed_draft_id = next(
+                (
+                    item["id"] for item in history_data["drafts"]
+                    if self.state.draft_completed and item["event"] == self.state.last_event_name
+                ),
+                None,
+            )
             taken_cards = [
                 self.lookup(card_id)
                 for card_id in self.history.current_taken_ids(obs)
@@ -367,6 +383,8 @@ class Guide:
                 "cards": cards,
                 "takenCards": taken_cards,
                 "history": history_data,
+                "draftCompleted": completed_draft_id is not None,
+                "completedDraftId": completed_draft_id,
                 "status": {
                     "logFound": self.demo or self.log_path.exists(),
                     "cardDb": bool(self.names) or self.demo,

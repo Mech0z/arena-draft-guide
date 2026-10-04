@@ -13,6 +13,8 @@ let historyDetail = null;
 let historyLoading = false;
 let historyError = null;
 let replayIndex = 0;
+let selectedDeckPair = null;
+let autoOpenedCompletedDraftId = null;
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -541,6 +543,21 @@ function render(state) {
   if (!state.sealedPool && activeView === "sealed") activeView = state.game ? "library" : "draft";
   if (state.game && activeView === "draft") activeView = "library";
   if (!state.game && activeView === "library") activeView = state.sealedPool ? "sealed" : "draft";
+  if (state.completedDraftId && state.completedDraftId !== autoOpenedCompletedDraftId) {
+    autoOpenedCompletedDraftId = state.completedDraftId;
+    activeView = "history";
+    historySelection = { kind: "draft", id: state.completedDraftId };
+    historyDetail = null;
+    historyLoading = true;
+    historyError = null;
+    replayIndex = 0;
+    selectedDeckPair = null;
+    setTimeout(() => {
+      if (currentState?.completedDraftId === state.completedDraftId) {
+        loadHistoryEntry("draft", state.completedDraftId);
+      }
+    }, 0);
+  }
   preview.hide();
   renderArchetypes(state.archetypes, Boolean(state.game));
   const tabs = document.getElementById("draft-tabs");
@@ -648,6 +665,98 @@ function renderHistory(history) {
   main.append(detail);
 }
 
+function renderDeckAnalysis(container, deckBuild) {
+  const builds = deckBuild?.builds || [];
+  if (!builds.length) return;
+  const pairKey = (build) => build.colors.join("");
+  const selected = builds.find((build) => pairKey(build) === selectedDeckPair) || builds[0];
+  selectedDeckPair = pairKey(selected);
+
+  const section = el("section", "deck-analysis");
+  const heading = el("div", "deck-analysis-heading");
+  heading.append(el("h2", "", "Deck checks and cut suggestions"));
+  const pairLabel = el("label", "deck-pair-control", "Suggested color pair");
+  const pairSelect = el("select", "sealed-analysis-limit");
+  pairSelect.setAttribute("aria-label", "Suggested color pair");
+  for (const build of builds) {
+    const option = el("option", "", `${build.name} · ${build.eligibleCount} eligible`);
+    option.value = pairKey(build);
+    pairSelect.append(option);
+  }
+  pairSelect.value = pairKey(selected);
+  pairSelect.addEventListener("change", () => {
+    selectedDeckPair = pairSelect.value;
+    render(currentState);
+  });
+  pairLabel.append(pairSelect);
+  heading.append(pairLabel);
+  section.append(heading);
+
+  const note = `Rating-led starting point: the top ${selected.cards.length} of ${selected.eligibleCount} nonland cards that fit ${selected.name}. This is a heuristic, not a finished deck recommendation.`;
+  section.append(el("p", "deck-analysis-note", note));
+
+  const checks = el("div", "deck-checks");
+  for (const check of selected.balance.checks) {
+    const item = el("article", "deck-check " + check.status);
+    item.append(el("span", "deck-check-value", check.value),
+      el("strong", "", check.label),
+      el("span", "deck-check-detail", check.detail));
+    checks.append(item);
+  }
+  section.append(checks);
+
+  const metrics = el("div", "deck-metrics");
+  const curve = el("div", "deck-curve");
+  curve.append(el("h3", "", `Mana curve · ${selected.balance.knownManaCosts}/${selected.cards.length} costs known`));
+  const maxCurve = Math.max(1, ...selected.balance.curve.map((item) => item.count));
+  for (const item of selected.balance.curve) {
+    const row = el("div", "deck-curve-row");
+    row.append(el("span", "", String(item.manaValue)));
+    const track = el("span", "deck-curve-track");
+    const bar = el("span", "deck-curve-bar");
+    bar.style.width = `${item.count / maxCurve * 100}%`;
+    track.append(bar);
+    row.append(track, el("b", "", String(item.count)));
+    curve.append(row);
+  }
+  if (!selected.balance.curve.length) curve.append(el("span", "deck-check-detail", "Mana costs unavailable."));
+  metrics.append(curve);
+  const colors = el("div", "deck-color-pips");
+  colors.append(el("h3", "", "Colored mana requirements"));
+  const pips = Object.entries(selected.balance.pips);
+  colors.append(el("p", "", pips.length
+    ? pips.map(([color, count]) => `${color}: ${count}`).join(" · ")
+    : "No colored mana costs available."));
+  if (selected.averageScore !== null) {
+    colors.append(el("p", "", `Average available grade: ${selected.averageScore}`));
+  }
+  metrics.append(colors);
+  section.append(metrics);
+
+  const suggestions = el("section", "deck-suggestions");
+  suggestions.append(el("h3", "", `Suggested spells (${selected.cards.length})`));
+  const suggestedCards = el("div", "deck-suggested-cards");
+  for (const card of selected.cards) suggestedCards.append(renderPoolCard(card));
+  suggestions.append(suggestedCards);
+  section.append(suggestions);
+
+  const cuts = el("section", "deck-cuts");
+  cuts.append(el("h3", "", "Potential cuts"));
+  if (!selected.cuts.length) {
+    cuts.append(el("p", "deck-check-detail", "No cards left outside this suggested build."));
+  } else {
+    const cutCards = el("div", "deck-cut-cards");
+    for (const card of selected.cuts) {
+      const item = el("div", "deck-cut-card");
+      item.append(el("span", "deck-cut-reason", card.cutReason), renderPoolCard(card));
+      cutCards.append(item);
+    }
+    cuts.append(cutCards);
+  }
+  section.append(cuts);
+  container.append(section);
+}
+
 function renderDraftReplay(container, draft) {
   const observations = draft.observations || [];
   if (!observations.length) {
@@ -656,6 +765,7 @@ function renderDraftReplay(container, draft) {
     return;
   }
   const pickedCards = observations.flatMap((observation) => observation.chosenCards || []);
+  renderDeckAnalysis(container, draft.deckBuild);
   const colorGroups = [
     ["W", "White"], ["U", "Blue"], ["B", "Black"], ["R", "Red"], ["G", "Green"],
     ["Multicolor", "Multicolor"], ["Colorless", "Colorless"],
@@ -737,6 +847,7 @@ async function loadHistoryEntry(kind, id) {
   historyLoading = true;
   historyError = null;
   replayIndex = 0;
+  selectedDeckPair = null;
   render(currentState);
   try {
     const response = await fetch(`/api/history/${kind}/${encodeURIComponent(id)}`, { cache: "no-store" });
