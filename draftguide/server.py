@@ -226,15 +226,24 @@ class Guide:
         observation = self.state.sealed_pool or self.state.pack
         event_name = observation.event_name if observation else self.state.last_event_name
         match = _LIMITED_EVENT.match(event_name or "")
-        if not match or not game.deck:
+        if not game.deck:
             return None
         # GRE gives us the deck list but not a reliable current match-format identifier.
         if len(game.deck) >= 60:
             return None
-        pool_set = match.group("set").upper()
         nonlands = [grp for grp in game.deck if grp not in self.lands]
-        matching_cards = sum(self.expansions.get(grp) == pool_set for grp in nonlands)
-        if not nonlands or matching_cards * 2 < len(nonlands):
+        if not nonlands:
+            return None
+        event_set = match.group("set").upper() if match else None
+        pool_set = next(
+            (
+                code for code in dict.fromkeys((event_set, self.detect_game_set()))
+                if code
+                and sum(self.expansions.get(grp) == code for grp in nonlands) * 2 >= len(nonlands)
+            ),
+            None,
+        )
+        if not pool_set:
             return None
         view = instants.guide(game.opponent_lands(), game.opponent_seen_grp_ids(), self.instant_info, self.land_colors,
                               pool_set=pool_set)

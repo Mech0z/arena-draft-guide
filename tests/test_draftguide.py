@@ -159,16 +159,17 @@ class GuideTests(unittest.TestCase):
         self.assertTrue(snapshot["draftCompleted"])
         self.assertEqual(snapshot["completedDraftId"], snapshot["history"]["drafts"][0]["id"])
 
-    def test_instant_guide_requires_limited_event_and_matching_deck_set(self):
+    def test_instant_guide_uses_limited_event_or_dominant_deck_set(self):
         game = self.guide.state.game
         game.deck = [101, 102]
         self.guide.expansions = {101: "FRA", 102: "FRA"}
-        self.assertIsNone(self.guide.instant_view(game))
+        self.assertIsNotNone(self.guide.instant_view(game))
 
         self.guide.state.last_event_name = "PremierDraft_FRA_20260929"
         self.assertIsNotNone(self.guide.instant_view(game))
 
-        self.guide.expansions = {101: "FDN", 102: "FDN"}
+        game.deck = [101, 102, 103]
+        self.guide.expansions = {101: "FDN", 102: "WOE", 103: "ECL"}
         self.assertIsNone(self.guide.instant_view(game))
 
     def test_history_details_enrich_draft_and_sealed_cards(self):
