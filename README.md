@@ -66,6 +66,9 @@ already shown (battlefield, graveyard, exile, stack) and (2) instants/flash crea
 instant/flash cards in their colours that their untapped mana can pay for.
 Greyed cards are shown but not currently affordable. Hover for a larger image.
 
+If Arena has not logged a Limited event for the current session, the guide
+infers the set from the deck's most common expansion and requires at least half
+of its nonland cards to belong to that set.
 The guide is hidden for decks of 60 or more cards. Arena does not provide a
 reliable current match-format identifier in the data this view uses, so a
 smaller constructed deck can still be ambiguous.
