@@ -541,13 +541,8 @@ function render(state) {
   }
   if (state.sealedPool && !previousState?.sealedPool && !state.game && !state.pack) activeView = "sealed";
   if (!state.sealedPool && activeView === "sealed") activeView = state.game ? "library" : "draft";
-  if (state.game && activeView === "draft") activeView = "library";
+  if (state.game && !previousState?.game) activeView = "library";
   if (!state.game && activeView === "library") activeView = state.sealedPool ? "sealed" : "draft";
-  if (
-    state.game && !previousState?.game && activeView === "history"
-    && historySelection?.kind === "draft"
-    && historySelection.id === autoOpenedCompletedDraftId
-  ) activeView = "library";
   if (state.completedDraftId && state.completedDraftId !== autoOpenedCompletedDraftId) {
     autoOpenedCompletedDraftId = state.completedDraftId;
     if (!state.game) {
