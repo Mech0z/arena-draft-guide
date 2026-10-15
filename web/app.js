@@ -545,20 +545,18 @@ function render(state) {
   if (!state.game && activeView === "library") activeView = state.sealedPool ? "sealed" : "draft";
   if (state.completedDraftId && state.completedDraftId !== autoOpenedCompletedDraftId) {
     autoOpenedCompletedDraftId = state.completedDraftId;
-    if (!state.game) {
-      activeView = "history";
-      historySelection = { kind: "draft", id: state.completedDraftId };
-      historyDetail = null;
-      historyLoading = true;
-      historyError = null;
-      replayIndex = 0;
-      selectedDeckPair = null;
-      setTimeout(() => {
-        if (currentState?.completedDraftId === state.completedDraftId) {
-          loadHistoryEntry("draft", state.completedDraftId);
-        }
-      }, 0);
-    }
+    activeView = "history";
+    historySelection = { kind: "draft", id: state.completedDraftId };
+    historyDetail = null;
+    historyLoading = true;
+    historyError = null;
+    replayIndex = 0;
+    selectedDeckPair = null;
+    setTimeout(() => {
+      if (currentState?.completedDraftId === state.completedDraftId) {
+        loadHistoryEntry("draft", state.completedDraftId);
+      }
+    }, 0);
   }
   preview.hide();
   renderArchetypes(state.archetypes, Boolean(state.game));
@@ -766,14 +764,16 @@ function renderDraftReplay(container, draft) {
     container.append(el("div", "empty", "No pack observations were saved for this draft."));
     return;
   }
-  const pickedCards = observations.flatMap((observation) => observation.chosenCards || []);
+  const pickedCards = draft.draftedCards?.length
+    ? draft.draftedCards
+    : observations.flatMap((observation) => observation.chosenCards || []);
   renderDeckAnalysis(container, draft.deckBuild);
   const colorGroups = [
     ["W", "White"], ["U", "Blue"], ["B", "Black"], ["R", "Red"], ["G", "Green"],
     ["Multicolor", "Multicolor"], ["Colorless", "Colorless"],
   ];
   const pickSummary = el("section", "history-draft-picks");
-  pickSummary.append(el("h2", "", `Your draft picks · ${pickedCards.length} cards`));
+  pickSummary.append(el("h2", "", `${draft.draftedCards?.length ? "Your drafted pool" : "Your draft picks"} · ${pickedCards.length} cards`));
   for (const [key, label] of colorGroups) {
     const cardsInColor = pickedCards
       .filter((card) => sealedColorGroup(card) === key)
@@ -789,7 +789,7 @@ function renderDraftReplay(container, draft) {
     pickSummary.append(group);
   }
   if (!pickedCards.length) {
-    pickSummary.append(el("div", "empty", "No selected cards could be inferred from this draft log."));
+    pickSummary.append(el("div", "empty", "Arena did not include the drafted card pool in its log."));
   }
   container.append(pickSummary);
   container.append(el("h2", "", `Draft replay · ${draft.event || "Unknown event"}`));

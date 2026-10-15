@@ -70,6 +70,12 @@ class HistoryStore:
                     card_ids TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS draft_pools (
+                    draft_id TEXT PRIMARY KEY REFERENCES drafts(id) ON DELETE CASCADE,
+                    event TEXT NOT NULL,
+                    card_ids TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -204,11 +210,35 @@ class HistoryStore:
                 (str(uuid.uuid4()), event, fingerprint, _json_ids(card_ids), _now()),
             )
 
+    def record_draft_pool(self, observation) -> None:
+        with self._lock:
+            draft_id = self._active_draft_id
+            event = observation.event_name or self._active_event or ""
+            if not draft_id or (self._active_event and event and event != self._active_event):
+                return
+            with self._connect() as connection:
+                connection.execute(
+                    "INSERT OR REPLACE INTO draft_pools (draft_id, event, card_ids, updated_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (draft_id, event, _json_ids(observation.card_ids), _now()),
+                )
+                if event and not self._active_event:
+                    connection.execute(
+                        "UPDATE drafts SET event = CASE WHEN event = '' THEN ? ELSE event END WHERE id = ?",
+                        (event, draft_id),
+                    )
+                    self._active_event = event
+
     def reset_log_context(self) -> None:
         with self._lock:
             self._active_draft_id = None
             self._active_event = None
             self._previous_observation = None
+
+    @property
+    def active_draft_id(self) -> str | None:
+        with self._lock:
+            return self._active_draft_id
 
     @staticmethod
     def _taken_ids(observations: list[dict], current: dict) -> list[int]:
@@ -304,6 +334,9 @@ class HistoryStore:
                 "FROM draft_observations WHERE draft_id = ? ORDER BY id",
                 (draft_id,),
             ).fetchall()
+            pool = connection.execute(
+                "SELECT card_ids FROM draft_pools WHERE draft_id = ?", (draft_id,)
+            ).fetchone()
             items = [
                 {
                     "id": row["id"],
@@ -324,6 +357,7 @@ class HistoryStore:
                 "startedAt": draft["started_at"],
                 "updatedAt": draft["updated_at"],
                 "observations": items,
+                "cardPool": json.loads(pool["card_ids"]) if pool else [],
             }
 
     def get_sealed(self, sealed_id: str) -> dict | None:
