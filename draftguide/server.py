@@ -278,9 +278,14 @@ class Guide:
                     self._historical_card(card_id, by_name)
                     for card_id in observation["chosenIds"]
                 ]
+            pool_cards = [
+                self._historical_card(card_id, by_name)
+                for card_id in detail.pop("cardPool", [])
+            ]
+            detail["draftedCards"] = pool_cards
             guide, _ = self._archetypes_for(code)
             detail["deckBuild"] = deckbuild.analyze_pool(
-                [
+                pool_cards or [
                     card
                     for observation in detail["observations"]
                     for card in observation["chosenCards"]
@@ -326,6 +331,7 @@ class Guide:
                 on_pack=self.history.record_pack,
                 on_sealed=self.history.record_sealed,
                 on_reset=self.history.reset_log_context,
+                on_draft_pool=self.history.record_draft_pool,
             ):
                 self.updated_at = time.time()
 
@@ -368,10 +374,11 @@ class Guide:
             archetype_data, archetype_version = self._archetypes_for(code)
             sealed_data = self.sealed_view(archetype_data)
             history_data = self.history.list_history()
+            active_draft_id = self.history.active_draft_id
             completed_draft_id = next(
                 (
                     item["id"] for item in history_data["drafts"]
-                    if self.state.draft_completed and item["event"] == self.state.last_event_name
+                    if self.state.draft_completed and item["id"] == active_draft_id
                 ),
                 None,
             )

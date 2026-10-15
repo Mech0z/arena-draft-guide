@@ -170,6 +170,54 @@ class GameViewTests(unittest.TestCase):
         self.assertIsNotNone(snap2["game"])
         self.assertNotEqual(snap["version"], snap2["version"])
 
+    def test_submitted_deck_completes_quick_draft_without_empty_pack_event(self):
+        for pack_number in range(1, 4):
+            line = "Draft.Notify " + json.dumps({
+                "SelfPack": pack_number,
+                "SelfPick": 14,
+                "PackCards": str(100 + pack_number),
+            })
+            logparse.apply_lines(
+                self.guide.state, [line], on_pack=self.guide.history.record_pack,
+            )
+
+        logparse.apply_lines(self.guide.state, gre(connect(DECK)).splitlines())
+
+        snapshot = self.guide.snapshot()
+        self.assertTrue(snapshot["draftCompleted"])
+        self.assertEqual(snapshot["completedDraftId"], snapshot["history"]["drafts"][0]["id"])
+        self.assertIsNone(snapshot["pack"])
+        self.assertIsNotNone(snapshot["game"])
+
+    def test_completed_course_pool_feeds_history_deck_builder(self):
+        for pack_number in range(1, 4):
+            line = "Draft.Notify " + json.dumps({
+                "SelfPack": pack_number,
+                "SelfPick": 14,
+                "PackCards": str(100 + pack_number),
+            })
+            logparse.apply_lines(
+                self.guide.state, [line], on_pack=self.guide.history.record_pack,
+            )
+        course = json.dumps({
+            "Courses": [{
+                "InternalEventName": "QuickDraft_FRA_20260929",
+                "CardPool": [2] * 42,
+            }],
+        })
+        logparse.apply_lines(
+            self.guide.state, [course],
+            on_draft_pool=self.guide.history.record_draft_pool,
+        )
+
+        draft_id = self.guide.history.active_draft_id
+        detail = self.guide.history_detail("draft", draft_id)
+        self.assertTrue(self.guide.state.draft_completed)
+        self.assertIsNone(self.guide.state.pack)
+        self.assertEqual(detail["event"], "QuickDraft_FRA_20260929")
+        self.assertEqual(len(detail["draftedCards"]), 42)
+        self.assertEqual(len(detail["deckBuild"]["builds"]), 10)
+
     def test_game_hidden_after_game_over(self):
         self.write(gre(connect(DECK)), gre(state([], [], over=True)))
         self.assertIsNone(self.guide.snapshot()["game"])

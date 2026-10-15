@@ -112,6 +112,21 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(observation.event_name, "Sealed_FRA_20260929")
         self.assertEqual(observation.card_ids, tuple(range(1, 46)))
 
+    def test_nested_draft_pool_reads_completed_course_card_pool(self):
+        event = {
+            "InternalEventName": "PremierDraft_FRA_20260929",
+            "CardPool": [{"GrpId": 101}] * 42,
+        }
+        line = json.dumps({"payload": json.dumps({"Courses": [event]})})
+        observation = logparse.parse_draft_pool_line(line)
+
+        self.assertEqual(observation.event_name, "PremierDraft_FRA_20260929")
+        self.assertEqual(observation.card_ids, (101,) * 42)
+        self.assertIsNone(logparse.parse_draft_pool_line(json.dumps({
+            "InternalEventName": "Sealed_FRA_20260929",
+            "CardPool": [101] * 42,
+        })))
+
     def test_sealed_pool_updates_state_and_is_cleared_by_draft_pack(self):
         state = logparse.DraftLogState()
         sealed_line = json.dumps({

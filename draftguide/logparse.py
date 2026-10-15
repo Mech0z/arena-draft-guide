@@ -17,6 +17,7 @@ _NUM = {
 _EVENT = re.compile(r'"EventName"\s*:\s*"([^"]+)"')
 _PICKED = re.compile(r'"PickedCards"\s*:\s*\[([^\]]*)\]')
 _DIGITS = re.compile(r"\d+")
+_DRAFT_EVENT = re.compile(r"^(?:PremierDraft|QuickDraft|TradDraft|Traditional_Draft|PickTwoDraft)_", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,12 @@ class SealedObservation:
     event_name: str
 
 
+@dataclass(frozen=True)
+class DraftPoolObservation:
+    card_ids: tuple[int, ...]
+    event_name: str
+
+
 @dataclass
 class DraftLogState:
     pack: PackObservation | None = None
@@ -42,6 +49,8 @@ class DraftLogState:
     last_event_name: str | None = None
     observed_pack_numbers: set[int] = field(default_factory=set)
     draft_completed: bool = False
+    draft_pool: tuple[int, ...] = ()
+    draft_pool_event_name: str | None = None
     version: int = 0
     offset: int = 0
     _seen: tuple = field(default=(), repr=False)
@@ -135,11 +144,46 @@ def parse_sealed_pool_line(line: str) -> SealedObservation | None:
     return None
 
 
-def apply_lines(state: DraftLogState, lines, on_pack=None, on_sealed=None) -> bool:
+def parse_draft_pool_line(line: str) -> DraftPoolObservation | None:
+    """Find a completed Limited draft's CardPool in an Arena course record."""
+    if "CardPool" not in line and "cardPool" not in line:
+        return None
+    start = line.find("{")
+    if start < 0:
+        return None
+    try:
+        payload, _ = json.JSONDecoder().raw_decode(line[start:])
+    except ValueError:
+        return None
+    for value in _nested_json(payload):
+        event_name = (
+            value.get("InternalEventName") or value.get("internalEventName")
+            or value.get("EventName") or value.get("eventName")
+        )
+        if not isinstance(event_name, str) or not _DRAFT_EVENT.match(event_name):
+            continue
+        card_ids = _pool_ids(value.get("CardPool", value.get("cardPool")))
+        if len(card_ids) >= 40:
+            return DraftPoolObservation(card_ids, event_name)
+    return None
+
+
+def apply_lines(state: DraftLogState, lines, on_pack=None, on_sealed=None, on_draft_pool=None) -> bool:
     changed = False
     for line in lines:
+        game_was_active = state.game.active
         if state.game.feed_line(line):
             changed = True
+            if (
+                not game_was_active
+                and state.game.active
+                and state.pack is not None
+                and len(state.observed_pack_numbers) >= 3
+            ):
+                state.draft_completed = True
+                state.observed_pack_numbers.clear()
+                state.pack = None
+                state.version += 1
         sealed = parse_sealed_pool_line(line)
         if sealed is not None and sealed != state.sealed_pool:
             state.sealed_pool = sealed
@@ -147,11 +191,28 @@ def apply_lines(state: DraftLogState, lines, on_pack=None, on_sealed=None) -> bo
             state.pack = None
             state.observed_pack_numbers.clear()
             state.draft_completed = False
+            state.draft_pool = ()
+            state.draft_pool_event_name = None
             state._seen = ()
             state.version += 1
             changed = True
             if on_sealed:
                 on_sealed(sealed)
+        draft_pool = parse_draft_pool_line(line)
+        if draft_pool is not None and (
+            draft_pool.card_ids != state.draft_pool
+            or draft_pool.event_name != state.draft_pool_event_name
+        ):
+            state.draft_pool = draft_pool.card_ids
+            state.draft_pool_event_name = draft_pool.event_name
+            state.last_event_name = draft_pool.event_name
+            state.pack = None
+            state.observed_pack_numbers.clear()
+            state.draft_completed = True
+            state.version += 1
+            changed = True
+            if on_draft_pool:
+                on_draft_pool(draft_pool)
         obs = parse_line(line)
         if obs is None:
             continue
@@ -159,6 +220,8 @@ def apply_lines(state: DraftLogState, lines, on_pack=None, on_sealed=None) -> bo
             if state.last_event_name and obs.event_name != state.last_event_name:
                 state.observed_pack_numbers.clear()
                 state.draft_completed = False
+                state.draft_pool = ()
+                state.draft_pool_event_name = None
             state.last_event_name = obs.event_name
         key = (obs.card_ids, obs.pack_number, obs.pick_number, obs.picked_ids, obs.event_name, obs.source)
         if key == state._seen:
@@ -170,6 +233,8 @@ def apply_lines(state: DraftLogState, lines, on_pack=None, on_sealed=None) -> bo
             if state.draft_completed:
                 state.observed_pack_numbers.clear()
                 state.draft_completed = False
+                state.draft_pool = ()
+                state.draft_pool_event_name = None
             if obs.pack_number is not None:
                 state.observed_pack_numbers.add(obs.pack_number)
         elif len(state.observed_pack_numbers) >= 3:
@@ -183,7 +248,7 @@ def apply_lines(state: DraftLogState, lines, on_pack=None, on_sealed=None) -> bo
     return changed
 
 
-def poll(state: DraftLogState, log_path: Path, on_pack=None, on_sealed=None, on_reset=None) -> bool:
+def poll(state: DraftLogState, log_path: Path, on_pack=None, on_sealed=None, on_reset=None, on_draft_pool=None) -> bool:
     """Read newly appended log text; restart from the top when Arena rewrote the file."""
     try:
         size = log_path.stat().st_size
@@ -196,6 +261,8 @@ def poll(state: DraftLogState, log_path: Path, on_pack=None, on_sealed=None, on_
         state.last_event_name = None
         state.observed_pack_numbers.clear()
         state.draft_completed = False
+        state.draft_pool = ()
+        state.draft_pool_event_name = None
         state._seen = ()
         state.game = GameTracker()
         state.version += 1
@@ -215,4 +282,5 @@ def poll(state: DraftLogState, log_path: Path, on_pack=None, on_sealed=None, on_
         chunk[: end + 1].decode("utf-8", errors="replace").splitlines(),
         on_pack=on_pack,
         on_sealed=on_sealed,
+        on_draft_pool=on_draft_pool,
     )
